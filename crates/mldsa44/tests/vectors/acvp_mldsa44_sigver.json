@@ -1,0 +1,18 @@
+[
+  {
+    "_comment": "PLACEHOLDER — Replace with official NIST ACVP ML-DSA-44 sigVer vectors.",
+    "_source": "https://github.com/usnistgov/ACVP-Server/tree/master/gen-val/json-files/ML-DSA-sigVer-FIPS204",
+    "_download_instructions": [
+      "Option A (automatic): python3 tests/download_nist_acvp.py",
+      "Option B (manual):    git clone https://github.com/usnistgov/ACVP-Server.git",
+      "                      python3 tests/download_nist_acvp.py --local ACVP-Server/gen-val/json-files/ML-DSA-sigVer-FIPS204/",
+      "Run tests:            cargo test -p andna-mldsa44 --test acvp_sigver --features oqs-backend"
+    ],
+    "_format": "Each entry: { tcId, pk (hex, 1312 bytes), message (hex, variable), signature (hex, 2420 bytes), expected (bool) }",
+    "tcId": 0,
+    "pk": "",
+    "message": "",
+    "signature": "",
+    "expected": true
+  }
+]

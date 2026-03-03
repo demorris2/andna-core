@@ -1,0 +1,10 @@
+[package]
+name = "andna-transcript"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+andna-contracts = { workspace = true }
+sha3 = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }

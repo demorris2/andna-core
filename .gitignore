@@ -1,0 +1,5 @@
+/target
+# Cargo.lock is committed for reproducible builds (R1 requirement)
+*.swp
+*.swo
+.DS_Store

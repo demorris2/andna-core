@@ -1,0 +1,19 @@
+[package]
+name = "andna-mldsa44"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["oqs-backend"]
+oqs-backend = ["dep:oqs"]
+# Enable for environments without liboqs (CI bootstrapping, etc.)
+# cargo test -p andna-mldsa44 --no-default-features --features stub
+stub = []
+
+[dependencies]
+andna-contracts = { workspace = true }
+oqs = { workspace = true, optional = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+serde_json = "1"

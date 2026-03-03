@@ -1,0 +1,19 @@
+[package]
+name = "andna-ffi"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[features]
+default = ["oqs-backend"]
+oqs-backend = ["andna-core/oqs-backend"]
+stub = ["andna-core/stub"]
+
+[dependencies]
+andna-contracts = { workspace = true }
+andna-core      = { workspace = true }
+andna-codec     = { workspace = true }
+
+

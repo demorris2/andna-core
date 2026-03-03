@@ -1,0 +1,15 @@
+# .cargo/config.toml — andna-core workspace
+#
+# Fixes linker failures on MSYS2 MinGW64 where liboqs.a depends on
+# OpenSSL (libcrypto) and the Windows Crypto API (advapi32), but the
+# oqs-sys build script doesn't emit the correct -L/-l flags for test
+# executables.
+#
+# Place this file at: C:\andna-core\.cargo\config.toml
+
+[target.x86_64-pc-windows-gnu]
+rustflags = [
+    "-L", "/mingw64/lib",
+    "-l", "crypto",
+    "-l", "advapi32",
+]

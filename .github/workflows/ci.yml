@@ -1,0 +1,206 @@
+name: andna-core CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+          components: clippy, rustfmt
+
+      - name: Install liboqs (system)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build
+          git clone --depth 1 --branch 0.10.1 https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
+          cd /tmp/liboqs
+          mkdir build && cd build
+          cmake -GNinja -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=/usr/local ..
+          ninja
+          sudo ninja install
+          sudo ldconfig
+          echo "✓ liboqs installed"
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Unit tests (Rust, with real ML-DSA-44)
+        run: cargo test --all
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+
+      - name: ACVP sigVer tests
+        run: cargo test -p andna-mldsa44 --test acvp_sigver -- --nocapture
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+
+      - name: Build release
+        run: cargo build --release --all
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+
+  python-tests:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+
+      - name: Install liboqs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build
+          git clone --depth 1 --branch 0.10.1 https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
+          cd /tmp/liboqs && mkdir build && cd build
+          cmake -GNinja -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=/usr/local ..
+          ninja && sudo ninja install && sudo ldconfig
+
+      - name: Build Rust FFI (release)
+        run: cargo build --release -p andna-ffi
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: pip install pytest
+
+      - name: Python tests (engine=python)
+        run: |
+          cd python
+          VERIFY_ENGINE=python python -m pytest tests/ -v
+        env:
+          PYTHONDONTWRITEBYTECODE: 1
+
+      - name: Python tests (engine=rust, via ctypes)
+        run: |
+          cd python
+          VERIFY_ENGINE=rust ANDNA_LIB_PATH=../target/release/libandna_ffi.so \
+            python -m pytest tests/ -v
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+          PYTHONDONTWRITEBYTECODE: 1
+
+      - name: Integration test (differential harness)
+        run: |
+          cd python
+          ANDNA_LIB_PATH=../target/release/libandna_ffi.so \
+            python -m pytest tests/test_integration.py -v --tb=short
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+
+  drift-check:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+
+      - name: Install liboqs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build
+          git clone --depth 1 --branch 0.10.1 https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
+          cd /tmp/liboqs && mkdir build && cd build
+          cmake -GNinja -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=/usr/local ..
+          ninja && sudo ninja install && sudo ldconfig
+
+      - name: Install cbindgen
+        run: cargo install cbindgen --version 0.26.0 --locked
+
+      - name: Regenerate headers
+        run: cargo run -p xtask -- gen-headers
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+
+      - name: Check for drift
+        run: |
+          if ! git diff --exit-code include/; then
+            echo "::error::Header drift detected! Run 'cargo run -p xtask -- gen-headers' and commit."
+            git diff include/
+            exit 1
+          fi
+          echo "✓ No drift"
+
+  release-artifacts:
+    runs-on: ubuntu-latest
+    needs: [test, python-tests, drift-check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.1"
+
+      - name: Install liboqs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake ninja-build
+          git clone --depth 1 --branch 0.10.1 https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
+          cd /tmp/liboqs && mkdir build && cd build
+          cmake -GNinja -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=/usr/local ..
+          ninja && sudo ninja install && sudo ldconfig
+
+      - name: Install cbindgen
+        run: cargo install cbindgen --version 0.26.0 --locked
+
+      - name: Build release
+        run: cargo build --release -p andna-ffi
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+
+      - name: Generate headers
+        run: cargo run -p xtask -- gen-headers
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+
+      - name: FFI smoke test
+        run: cargo run -p ffi-cli -- smoke
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+
+      - name: ACVP gate
+        run: cargo test -p andna-mldsa44 --test acvp_sigver -- --nocapture
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist/lib dist/include dist/python
+          cp target/release/libandna_ffi.so dist/lib/ 2>/dev/null || true
+          cp target/release/libandna_ffi.a dist/lib/ 2>/dev/null || true
+          cp target/release/libandna_ffi.dylib dist/lib/ 2>/dev/null || true
+          cp include/andna_vnext_contracts.h dist/include/
+          cp include/andna_core.h dist/include/
+          cp -r python/andna dist/python/
+          cp python/pyproject.toml dist/python/
+          echo "=== dist contents ==="
+          find dist -type f | sort
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: andna-ffi-${{ runner.os }}-${{ github.sha }}
+          path: dist/
+          retention-days: 30

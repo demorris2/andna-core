@@ -1,0 +1,8 @@
+target/
+**/__pycache__/
+*.pyc
+*.pyo
+.git/
+.github/
+*.zip
+dist/

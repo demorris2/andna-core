@@ -1,0 +1,19 @@
+[package]
+name = "andna-core"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["oqs-backend"]
+oqs-backend = ["andna-mldsa44/oqs-backend"]
+stub = ["andna-mldsa44/stub"]
+
+[dependencies]
+andna-contracts   = { workspace = true }
+andna-codec       = { workspace = true }
+andna-transcript  = { workspace = true }
+andna-mldsa44     = { workspace = true, default-features = false }
+zeroize           = { workspace = true }
+
+[dev-dependencies]
+oqs = { workspace = true }

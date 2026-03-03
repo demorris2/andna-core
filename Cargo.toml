@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/contracts",
+    "crates/codec",
+    "crates/transcript",
+    "crates/mldsa44",
+    "crates/core",
+    "crates/ffi",
+    "contracts_codegen",
+    "ffi_cli",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Proprietary"
+authors = ["Darrell Morris Jr."]
+
+[workspace.dependencies]
+# Internal crates
+andna-contracts = { path = "crates/contracts" }
+andna-codec     = { path = "crates/codec" }
+andna-transcript = { path = "crates/transcript" }
+andna-mldsa44   = { path = "crates/mldsa44", default-features = false }
+andna-core      = { path = "crates/core", default-features = false }
+
+# External
+sha3     = "0.10"
+zeroize  = { version = "1", features = ["derive"] }
+subtle   = "2"
+hex      = "0.4"
+oqs      = "0.10"
+serde_json = "1"

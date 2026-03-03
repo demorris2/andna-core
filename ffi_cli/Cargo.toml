@@ -1,0 +1,14 @@
+[package]
+name = "ffi-cli"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["oqs-backend"]
+oqs-backend = ["andna-ffi/oqs-backend"]
+stub = ["andna-ffi/stub"]
+
+[dependencies]
+andna-contracts = { workspace = true }
+andna-ffi = { path = "../crates/ffi", default-features = false }
+sha3 = { workspace = true }

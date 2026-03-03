@@ -1,0 +1,7 @@
+[package]
+name = "contracts_codegen"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+andna-contracts = { workspace = true }

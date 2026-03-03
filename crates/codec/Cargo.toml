@@ -1,0 +1,7 @@
+[package]
+name = "andna-codec"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+andna-contracts = { workspace = true }
