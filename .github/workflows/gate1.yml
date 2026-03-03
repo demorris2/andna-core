@@ -1,0 +1,23 @@
+name: Gate 1B (Host B Validation)
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  reproducibility-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Execute Deterministic Build
+        run: |
+          echo "Building AN-DNA Verifier Image..."
+          docker build -t andna-verifier .
+
+      - name: Extract Golden Hash
+        run: |
+          echo "Golden Hash is valid only within the pinned build lane defined in gate1_hostB_report.json."
+          docker run --rm --entrypoint sha256sum andna-verifier /usr/local/lib/libandna_ffi.so
