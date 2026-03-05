@@ -14,6 +14,7 @@ andna-contracts = { workspace = true }
 andna-ffi = { path = "../crates/ffi", default-features = false }
 sha2 = "0.10"
 serde_json = { workspace = true }
+sha3 = "0.10"
 
 [[bin]]
 name = "andna"
