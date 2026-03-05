@@ -8,9 +8,14 @@
 #ifndef ANDNA_CORE_H
 #define ANDNA_CORE_H
 
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <stddef.h>
 #include "andna_vnext_contracts.h"
+
 
 /**
  * C-compatible error codes.
@@ -41,38 +46,6 @@ typedef enum AndnaErr {
 } AndnaErr;
 
 /**
- * Parse hot-path fields from mu_pre for pre-crypto gating.
- *
- * # Safety
- * - `mu_pre` must point to at least `mu_pre_len` readable bytes
- * - `out_device_id32` must point to 32 writable bytes
- * - `out_epoch` must point to a valid u64
- * - `out_sid` must point to 32 writable bytes
- */
-AndnaErr andna_parse_mu_pre_header(const uint8_t *mu_pre,
-                                   size_t mu_pre_len,
-                                   uint8_t *out_device_id32,
-                                   uint64_t *out_epoch,
-                                   uint8_t *out_sid);
-
-/**
- * Return a human-readable error string for the given error code.
- *
- * The returned pointer is a static string — valid for the lifetime of the process.
- * Caller MUST NOT free it. This function cannot panic.
- */
-const char *andna_strerror(AndnaErr err);
-
-/**
- * Verify a packed v2 frame (4030 bytes).
- *
- * # Safety
- * - `frame` must point to at least `frame_len` readable bytes
- */
-AndnaErr andna_verify_frame_v2(const uint8_t *frame,
-                               size_t frame_len);
-
-/**
  * Verify mu_pre + T_E + signature.
  *
  * # Safety
@@ -81,17 +54,74 @@ AndnaErr andna_verify_frame_v2(const uint8_t *frame,
  * - `sig` must point to at least `sig_len` readable bytes
  * - All pointers must be valid for the duration of the call
  */
-AndnaErr andna_verify_vnext(const uint8_t *mu_pre,
-                            size_t mu_pre_len,
-                            const uint8_t *te,
-                            size_t te_len,
-                            const uint8_t *sig,
-                            size_t sig_len);
+enum AndnaErr andna_verify_vnext(const uint8_t *mu_pre,
+                                 uintptr_t mu_pre_len,
+                                 const uint8_t *te,
+                                 uintptr_t te_len,
+                                 const uint8_t *sig,
+                                 uintptr_t sig_len);
+
+/**
+ * Verify a packed v2 frame (4030 bytes).
+ *
+ * Gate 2 v1: Rust-owned audit sink appends one record per call.
+ *
+ * # Safety
+ * - `frame` must point to at least `frame_len` readable bytes
+ */
+enum AndnaErr andna_verify_frame_v2(const uint8_t *frame, uintptr_t frame_len);
+
+/**
+ * Parse hot-path fields from mu_pre for pre-crypto gating.
+ *
+ * # Safety
+ * - `mu_pre` must point to at least `mu_pre_len` readable bytes
+ * - `out_device_id32` must point to 32 writable bytes
+ * - `out_epoch` must point to a valid u64
+ * - `out_sid` must point to 32 writable bytes
+ */
+enum AndnaErr andna_parse_mu_pre_header(const uint8_t *mu_pre,
+                                        uintptr_t mu_pre_len,
+                                        uint8_t *out_device_id32,
+                                        uint64_t *out_epoch,
+                                        uint8_t *out_sid);
+
+/**
+ * Generate a complete, validly-signed 4030-byte test frame (Frame v2).
+ *
+ * Purpose: provide a real-signed frame so Python+Rust engines can agree on ACCEPT.
+ * This is only meaningful when the real signature backend is enabled.
+ *
+ * Keygen → build T_E → build mu_pre → sign μ → pack frame.
+ *
+ * # Safety
+ * - `out_ptr` must point to at least `out_len` writable bytes.
+ * - `out_len` MUST equal FRAME_V2_LEN.
+ */
+enum AndnaErr andna_gen_test_frame(uint8_t *out_ptr, uintptr_t out_len);
+
+/**
+ * Export the current Rust-owned audit log as deterministic JSONL.
+ *
+ * # Safety
+ * - `path` must be a valid NUL-terminated UTF-8 string pointer.
+ * - The file will be overwritten.
+ */
+enum AndnaErr andna_audit_export_jsonl(const char *path);
+
+/**
+ * Return a human-readable error string for the given error code.
+ *
+ * The returned pointer is a static `&str` — valid for the lifetime of the process.
+ * Caller MUST NOT free it. This function cannot panic.
+ */
+const char *andna_strerror(enum AndnaErr err);
 
 /**
  * Return the library version string (NUL-terminated).
  *
  * The returned pointer is a static string — valid for the lifetime of the process.
+ * This function cannot panic.
  */
 const char *andna_version(void);
 

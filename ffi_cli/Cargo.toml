@@ -9,6 +9,12 @@ oqs-backend = ["andna-ffi/oqs-backend"]
 stub = ["andna-ffi/stub"]
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 andna-contracts = { workspace = true }
 andna-ffi = { path = "../crates/ffi", default-features = false }
-sha3 = { workspace = true }
+sha2 = "0.10"
+serde_json = { workspace = true }
+
+[[bin]]
+name = "andna"
+path = "src/main.rs"

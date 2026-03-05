@@ -10,6 +10,7 @@ members = [
     "contracts_codegen",
     "ffi_cli",
     "xtask",
+    "crates/audit",
 ]
 
 [workspace.package]
