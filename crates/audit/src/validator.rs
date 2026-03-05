@@ -74,7 +74,7 @@ struct JsonRec {
     record_hash: String,
 }
 
-pub fn validate_jsonl(jsonl: &str) -> Result<(), ValidationError> {
+pub fn parse_jsonl(jsonl: &str) -> Result<Vec<AuditRecord>, ValidationError> {
     let mut records: Vec<AuditRecord> = Vec::new();
 
     for line in jsonl.lines() {
@@ -111,5 +111,10 @@ pub fn validate_jsonl(jsonl: &str) -> Result<(), ValidationError> {
         records.push(rec);
     }
 
+    Ok(records)
+}
+
+pub fn validate_jsonl(jsonl: &str) -> Result<(), ValidationError> {
+    let records = parse_jsonl(jsonl)?;
     validate_records(&records)
 }

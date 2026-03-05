@@ -1,4 +1,4 @@
-use sha2::{Digest, Sha256};
+use sha3::{Digest, Sha3_256};
 
 pub const MAGIC: [u8; 8] = *b"ANDNALOG";
 pub const VERSION: u32 = 1;
@@ -73,21 +73,21 @@ impl AuditRecord {
     }
 
     pub fn compute_record_hash(&self) -> [u8; 32] {
-        let mut hasher = Sha256::new();
+        let mut hasher = Sha3_256::new();
         hasher.update(self.to_canonical_bytes());
         hasher.finalize().into()
     }
 }
 
 // small helpers
-pub fn sha256(bytes: &[u8]) -> [u8; 32] {
-    let mut h = Sha256::new();
+pub fn sha3_256(bytes: &[u8]) -> [u8; 32] {
+    let mut h = Sha3_256::new();
     h.update(bytes);
     h.finalize().into()
 }
 
-pub fn sha256_str(s: &str) -> [u8; 32] {
-    sha256(s.as_bytes())
+pub fn sha3_256_str(s: &str) -> [u8; 32] {
+    sha3_256(s.as_bytes())
 }
 
 pub fn hex_lower(bytes: &[u8]) -> String {
