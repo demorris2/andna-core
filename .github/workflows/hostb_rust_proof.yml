@@ -46,7 +46,7 @@ jobs:
 
               cargo build -p ffi-cli --release
 
-              # FIX: absolute binary path so cd /out does not break it
+              # FIXED: Use absolute paths so it resolves correctly after changing directories
               BIN="/build/target/release/andna"
               if [ ! -x "$BIN" ]; then
                 BIN="/build/target/release/ffi-cli"
@@ -60,19 +60,22 @@ jobs:
               echo "Using Rust CLI binary: $BIN"
               "$BIN" --help | head -n 40 || true
 
+              # Sanity check: ensure this CLI supports gen/verify/tamper
               if ! "$BIN" gen --help >/dev/null 2>&1; then
                 echo "ERROR: Built legacy CLI (missing gen). You are not on the promoted CLI branch."
                 exit 1
               fi
 
+              # Run from /out so artifacts persist to the runner
               cd /out
-              rm -f sample_frame.bin tampered_frame.bin verification_log.json
+              rm -f sample_frame.bin tampered_frame.bin verification_log.json andna_audit.jsonl
               rm -rf evidence
 
               "$BIN" gen sample_frame.bin
               "$BIN" verify sample_frame.bin
               "$BIN" tamper sample_frame.bin tampered_frame.bin
 
+              # Expected failure: tampered verify must reject
               set +e
               "$BIN" verify tampered_frame.bin
               RC=$?
@@ -84,10 +87,14 @@ jobs:
 
               "$BIN" replay verification_log.json
               "$BIN" export evidence
-          '
+            '
 
       - name: Show Host B artifacts
         run: |
+          # ADDED: Output the Gate 2 authoritative artifact
+          echo "==== andna_audit.jsonl ===="
+          cat hostb_out/andna_audit.jsonl || true
+          echo ""
           echo "==== verification_log.json ===="
           cat hostb_out/verification_log.json || true
           echo ""
