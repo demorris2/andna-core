@@ -69,7 +69,7 @@ jobs:
               # Run from /out so artifacts persist to the runner
               cd /out
               rm -f sample_frame.bin tampered_frame.bin verification_log.json andna_audit.jsonl
-              rm -rf evidence
+              rm -rf evidence evidence_tampered
 
               # FIX: Copy the Golden Fixture instead of generating a new random one
               cp /build/demo/fixtures/sample_frame.bin sample_frame.bin
@@ -91,22 +91,60 @@ jobs:
               "$BIN" replay verification_log.json --frame sample_frame.bin
               
               "$BIN" export evidence
+
+              # ==========================================
+              # GATE 2 CI GATING & ACCEPTANCE HARNESS
+              # ==========================================
+              echo "Verifying Gate 2 artifacts..."
+              if [ ! -f evidence/andna_audit.jsonl ] || [ ! -f evidence/audit_validate.json ]; then
+                echo "ERROR: Gate 2 artifacts missing from export!"
+                exit 1
+              fi
+              if ! grep -q '"status": "PASS"' evidence/audit_validate.json; then
+                echo "ERROR: Gate 2 validator rejected the clean chain!"
+                cat evidence/audit_validate.json
+                exit 1
+              fi
+              echo "✓ Gate 1/T1 Baseline check passed."
+
+              echo "Running Gate 2 T2 Tamper-Evidence Test..."
+              # Copy the valid chain and intentionally corrupt a byte (change decision from 1 to 0)
+              cp andna_audit.jsonl tampered_audit.jsonl
+              sed -i '"'"'s/"decision":1/"decision":0/'"'"' tampered_audit.jsonl
+
+              # Swap it into place so the export command targets the corrupted file
+              mv andna_audit.jsonl good_audit.jsonl
+              mv tampered_audit.jsonl andna_audit.jsonl
+
+              # Run export on the corrupted chain (ignore exit code if CLI fails hard)
+              "$BIN" export evidence_tampered || true
+
+              # Assert that the validator explicitly flagged it as FAIL
+              if grep -q '"status": "PASS"' evidence_tampered/audit_validate.json; then
+                echo "ERROR: T2 FAILED! Validator blindly accepted a tampered audit log."
+                exit 1
+              else
+                echo "✓ T2 PASSED: Validator correctly caught the tampered log."
+              fi
+
+              # Restore the pristine chain for the final GitHub artifact upload
+              mv good_audit.jsonl andna_audit.jsonl
             '
 
       - name: Show Host B artifacts
         run: |
-          # ADDED: Output the Gate 2 authoritative artifact
+          # Output the Gate 2 authoritative artifact
           echo "==== andna_audit.jsonl ===="
           cat hostb_out/andna_audit.jsonl || true
+          echo ""
+          echo "==== audit_validate.json ===="
+          cat hostb_out/evidence/audit_validate.json || true
           echo ""
           echo "==== verification_log.json ===="
           cat hostb_out/verification_log.json || true
           echo ""
           echo "==== evidence/manifest.json ===="
           cat hostb_out/evidence/manifest.json || true
-          echo ""
-          echo "==== evidence/evidence.json ===="
-          cat hostb_out/evidence/evidence.json || true
 
       - name: Upload Host B artifacts
         uses: actions/upload-artifact@v4
