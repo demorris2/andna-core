@@ -27,24 +27,34 @@ jobs:
             andna-r1:builder \
             -lc '
               set -euo pipefail
+
               cd /build
+              cargo build -p ffi-cli --release
 
-              rm -f /out/sample_frame.bin /out/tampered_frame.bin /out/verification_log.json
-              rm -rf /out/evidence
-
-              # The builder stage already ran cargo build/test during docker build,
-              # but we’ll be defensive in case the binary isn’t present:
-              BIN="./target/release/andna"
+              # Binary name differs by branch:
+              # - some branches produce /build/target/release/andna
+              # - main currently produces /build/target/release/ffi-cli
+              BIN="/build/target/release/andna"
               if [ ! -x "$BIN" ]; then
-                cargo build -p ffi-cli --release
+                BIN="/build/target/release/ffi-cli"
+              fi
+              if [ ! -x "$BIN" ]; then
+                echo "ERROR: CLI binary not found. Contents of /build/target/release:"
+                ls -l /build/target/release
+                exit 1
               fi
 
-              $BIN gen /out/sample_frame.bin
-              $BIN verify /out/sample_frame.bin
-              $BIN tamper /out/sample_frame.bin /out/tampered_frame.bin
-              $BIN verify /out/tampered_frame.bin
-              $BIN replay /out/verification_log.json
-              $BIN export /out/evidence
+              # Run from /out so logs + evidence persist to the runner
+              cd /out
+              rm -f sample_frame.bin tampered_frame.bin verification_log.json
+              rm -rf evidence
+
+              $BIN gen sample_frame.bin
+              $BIN verify sample_frame.bin
+              $BIN tamper sample_frame.bin tampered_frame.bin
+              $BIN verify tampered_frame.bin
+              $BIN replay verification_log.json
+              $BIN export evidence
             '
 
       - name: Print Host B verification digest
