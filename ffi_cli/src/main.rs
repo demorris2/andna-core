@@ -173,12 +173,7 @@ fn cmd_verify(args: &[String]) -> i32 {
     }
 
     // Flush the Rust authoritative FFI sink to disk
-    unsafe {
-        if let Ok(c_path) = std::ffi::CString::new("andna_audit.jsonl") {
-            andna_audit_export_jsonl(c_path.as_ptr());
-        }
-    }
-
+    
     print_verify_result(path, &frame_hash, &record, duration_ms);
     if ok { 0 } else { 1 }
 }
