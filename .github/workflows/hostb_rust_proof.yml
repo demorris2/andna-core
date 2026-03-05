@@ -71,7 +71,9 @@ jobs:
               rm -f sample_frame.bin tampered_frame.bin verification_log.json andna_audit.jsonl
               rm -rf evidence
 
-              "$BIN" gen sample_frame.bin
+              # FIX: Copy the Golden Fixture instead of generating a new random one
+              cp /build/demo/fixtures/sample_frame.bin sample_frame.bin
+
               "$BIN" verify sample_frame.bin
               "$BIN" tamper sample_frame.bin tampered_frame.bin
 
@@ -85,7 +87,9 @@ jobs:
                 exit 1
               fi
 
-              "$BIN" replay verification_log.json
+              # Hardened Replay: Assert decisions against the specific frame bytes
+              "$BIN" replay verification_log.json --frame sample_frame.bin
+              
               "$BIN" export evidence
             '
 
