@@ -9,6 +9,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Confirm branch and CLI source
+        run: |
+          echo "github.ref_name=${{ github.ref_name }}"
+          git rev-parse --abbrev-ref HEAD
+          echo "---- ffi_cli/src/main.rs (first 5 lines) ----"
+          sed -n '1,5p' ffi_cli/src/main.rs
 
       - name: Build pinned Docker image
         run: |
