@@ -46,7 +46,6 @@ jobs:
 
               cargo build -p ffi-cli --release
 
-              # FIXED: Use absolute paths so it resolves correctly after changing directories
               BIN="/build/target/release/andna"
               if [ ! -x "$BIN" ]; then
                 BIN="/build/target/release/ffi-cli"
@@ -60,24 +59,20 @@ jobs:
               echo "Using Rust CLI binary: $BIN"
               "$BIN" --help | head -n 40 || true
 
-              # Sanity check: ensure this CLI supports gen/verify/tamper
               if ! "$BIN" gen --help >/dev/null 2>&1; then
-                echo "ERROR: Built legacy CLI (missing gen). You are not on the promoted CLI branch."
+                echo "ERROR: Built legacy CLI. You are not on the promoted CLI branch."
                 exit 1
               fi
 
-              # Run from /out so artifacts persist to the runner
               cd /out
               rm -f sample_frame.bin tampered_frame.bin verification_log.json andna_audit.jsonl
               rm -rf evidence evidence_tampered
 
-              # FIX: Copy the Golden Fixture instead of generating a new random one
               cp /build/demo/fixtures/sample_frame.bin sample_frame.bin
 
               "$BIN" verify sample_frame.bin
               "$BIN" tamper sample_frame.bin tampered_frame.bin
 
-              # Expected failure: tampered verify must reject
               set +e
               "$BIN" verify tampered_frame.bin
               RC=$?
@@ -87,7 +82,6 @@ jobs:
                 exit 1
               fi
 
-              # Hardened Replay: Assert decisions against the specific frame bytes
               "$BIN" replay verification_log.json --frame sample_frame.bin
               
               "$BIN" export evidence
@@ -100,7 +94,9 @@ jobs:
                 echo "ERROR: Gate 2 artifacts missing from export!"
                 exit 1
               fi
-              if ! grep -q '"status": "PASS"' evidence/audit_validate.json; then
+              
+              # Quote-safe check: just look for the word PASS
+              if ! grep -q PASS evidence/audit_validate.json; then
                 echo "ERROR: Gate 2 validator rejected the clean chain!"
                 cat evidence/audit_validate.json
                 exit 1
@@ -108,26 +104,23 @@ jobs:
               echo "✓ Gate 1/T1 Baseline check passed."
 
               echo "Running Gate 2 T2 Tamper-Evidence Test..."
-              # Copy the valid chain and intentionally corrupt a byte (change decision from 1 to 0)
               cp andna_audit.jsonl tampered_audit.jsonl
-              sed -i '"'"'s/"decision":1/"decision":0/'"'"' tampered_audit.jsonl
+              
+              # Quote-safe replacement using regex dot to match the quotes
+              sed -i s/decision.:1/decision.:0/ tampered_audit.jsonl
 
-              # Swap it into place so the export command targets the corrupted file
               mv andna_audit.jsonl good_audit.jsonl
               mv tampered_audit.jsonl andna_audit.jsonl
 
-              # Run export on the corrupted chain (ignore exit code if CLI fails hard)
               "$BIN" export evidence_tampered || true
 
-              # Assert that the validator explicitly flagged it as FAIL
-              if grep -q '"status": "PASS"' evidence_tampered/audit_validate.json; then
+              if grep -q PASS evidence_tampered/audit_validate.json; then
                 echo "ERROR: T2 FAILED! Validator blindly accepted a tampered audit log."
                 exit 1
               else
                 echo "✓ T2 PASSED: Validator correctly caught the tampered log."
               fi
 
-              # Restore the pristine chain for the final GitHub artifact upload
               mv good_audit.jsonl andna_audit.jsonl
             '
 
