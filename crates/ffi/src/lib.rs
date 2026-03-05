@@ -172,6 +172,7 @@ pub unsafe extern "C" fn andna_verify_frame_v2(frame: *const u8, frame_len: usiz
             err_code,
             notes_flags: 0,
             frame_bytes: Some(frame_slice),
+            frame_hash: None,
         });
 
         code
