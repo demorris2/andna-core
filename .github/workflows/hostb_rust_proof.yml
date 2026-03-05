@@ -10,36 +10,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build pinned Docker image
+      - name: Build pinned Docker image (builder stage for proof)
         run: |
-          docker build -t andna-r1:hostb .
+          docker build --target builder -t andna-r1:builder .
 
-      - name: Run Rust proof cycle inside Docker (clean)
+      - name: Run Rust proof cycle inside Docker (builder image, clean)
         run: |
           set -euo pipefail
 
-          # Make a clean workspace on the runner
           rm -rf hostb_out
           mkdir -p hostb_out
 
-          # Run inside the container, writing artifacts into hostb_out
           docker run --rm \
+            --entrypoint bash \
             -v "$PWD/hostb_out:/out" \
-            andna-r1:hostb \
-            bash -lc '
+            andna-r1:builder \
+            -lc '
               set -euo pipefail
-              cd /app
+              cd /build
 
-              # Clean inside container
               rm -f /out/sample_frame.bin /out/tampered_frame.bin /out/verification_log.json
               rm -rf /out/evidence
 
-              # Rust CLI location assumptions:
-              # 1) If your Docker build produces a release binary, adjust path accordingly.
-              # 2) We'll build it here deterministically in the pinned lane.
-              cargo build -p ffi-cli --release
-
+              # The builder stage already ran cargo build/test during docker build,
+              # but we’ll be defensive in case the binary isn’t present:
               BIN="./target/release/andna"
+              if [ ! -x "$BIN" ]; then
+                cargo build -p ffi-cli --release
+              fi
 
               $BIN gen /out/sample_frame.bin
               $BIN verify /out/sample_frame.bin
