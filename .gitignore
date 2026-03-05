@@ -3,3 +3,13 @@
 *.swp
 *.swo
 .DS_Store
+
+# local demo artifacts
+evidence/
+*.bin
+verification_log*.json
+
+# python noise
+python/__pycache__/
+python/andna.egg-info/
+*.pyc
