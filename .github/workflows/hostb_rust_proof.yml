@@ -46,27 +46,25 @@ jobs:
 
               cargo build -p ffi-cli --release
 
-              # Use the Rust-built binary (never /usr/local/bin/andna)
-              BIN="./target/release/andna"
+              # FIX: absolute binary path so cd /out does not break it
+              BIN="/build/target/release/andna"
               if [ ! -x "$BIN" ]; then
-                BIN="./target/release/ffi-cli"
+                BIN="/build/target/release/ffi-cli"
               fi
               if [ ! -x "$BIN" ]; then
                 echo "ERROR: Rust CLI binary not found."
-                ls -la ./target/release || true
+                ls -la /build/target/release || true
                 exit 1
               fi
 
               echo "Using Rust CLI binary: $BIN"
               "$BIN" --help | head -n 40 || true
 
-              # Sanity check: ensure this CLI supports gen/verify/tamper
               if ! "$BIN" gen --help >/dev/null 2>&1; then
                 echo "ERROR: Built legacy CLI (missing gen). You are not on the promoted CLI branch."
                 exit 1
               fi
 
-              # Run from /out so artifacts persist to the runner
               cd /out
               rm -f sample_frame.bin tampered_frame.bin verification_log.json
               rm -rf evidence
@@ -75,7 +73,6 @@ jobs:
               "$BIN" verify sample_frame.bin
               "$BIN" tamper sample_frame.bin tampered_frame.bin
 
-              # Expected failure: tampered verify must reject
               set +e
               "$BIN" verify tampered_frame.bin
               RC=$?
@@ -83,11 +80,11 @@ jobs:
               if [ "$RC" -eq 0 ]; then
                 echo "ERROR: tampered frame unexpectedly accepted"
                 exit 1
-             fi
+              fi
 
               "$BIN" replay verification_log.json
               "$BIN" export evidence
-            '
+          '
 
       - name: Show Host B artifacts
         run: |
