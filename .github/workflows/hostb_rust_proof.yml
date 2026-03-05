@@ -25,9 +25,9 @@ jobs:
           ls -la crates/audit || true
           test -f crates/audit/Cargo.toml && echo "OK: crates/audit/Cargo.toml exists" || (echo "MISSING: crates/audit/Cargo.toml" && exit 1)
 
-      - name: Build pinned Docker image (plain logs)
+      - name: Build pinned Docker image (builder stage, plain logs)
         run: |
-          docker build --progress=plain -t andna-r1:hostb .
+          docker build --progress=plain --target builder -t andna-r1:builder .
 
       - name: Run Rust proof cycle inside Docker
         run: |
@@ -39,36 +39,25 @@ jobs:
           docker run --rm \
             --entrypoint bash \
             -v "$PWD/hostb_out:/out" \
-            andna-r1:hostb \
+            andna-r1:builder \
             -lc '
               set -euo pipefail
 
-              # Runtime image from Dockerfile starts in /workspace.
-              # Rust binary is copied from builder into /usr/local/bin if available,
-              # otherwise fall back to building inside /build if that path exists.
-              if [ -x /usr/local/bin/andna ]; then
-                BIN="/usr/local/bin/andna"
-              elif [ -x /usr/local/bin/ffi-cli ]; then
-                BIN="/usr/local/bin/ffi-cli"
-              elif [ -x /build/target/release/andna ]; then
-                BIN="/build/target/release/andna"
-              elif [ -x /build/target/release/ffi-cli ]; then
+              cd /build
+
+              BIN="/build/target/release/andna"
+              if [ ! -x "$BIN" ]; then
                 BIN="/build/target/release/ffi-cli"
-              else
-                echo "ERROR: CLI binary not found."
-                echo "---- /usr/local/bin ----"
-                ls -la /usr/local/bin || true
-                echo "---- /build/target/release ----"
+              fi
+              if [ ! -x "$BIN" ]; then
+                echo "ERROR: Rust CLI binary not found."
                 ls -la /build/target/release || true
                 exit 1
               fi
 
-              echo "Using CLI binary: $BIN"
+              echo "Using Rust CLI binary: $BIN"
               "$BIN" version || true
-              echo "---- CLI help ----"
-              "$BIN" || true
 
-              # Run from /out so logs + evidence persist to the runner
               cd /out
               rm -f sample_frame.bin tampered_frame.bin verification_log.json
               rm -rf evidence
@@ -76,7 +65,18 @@ jobs:
               "$BIN" gen sample_frame.bin
               "$BIN" verify sample_frame.bin
               "$BIN" tamper sample_frame.bin tampered_frame.bin
+
+              # Expected failure: tampered frame must reject
+              set +e
               "$BIN" verify tampered_frame.bin
+              TAMPER_RC=$?
+              set -e
+
+              if [ "$TAMPER_RC" -eq 0 ]; then
+                echo "ERROR: tampered frame unexpectedly accepted"
+                exit 1
+              fi
+
               "$BIN" replay verification_log.json
               "$BIN" export evidence
             '
