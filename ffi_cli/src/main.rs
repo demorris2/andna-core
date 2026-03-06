@@ -342,6 +342,7 @@ fn cmd_export(args: &[String]) -> i32 {
             }
         }
     }
+    
     if let Err(e) = fs::write(output_dir.join("audit_validate.json"), val_json) {
         eprintln!("error: cannot write audit_validate.json: {}", e);
     }
