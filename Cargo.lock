@@ -241,6 +241,7 @@ dependencies = [
 name = "ffi-cli"
 version = "0.1.0"
 dependencies = [
+ "andna-audit",
  "andna-contracts",
  "andna-ffi",
  "serde",
