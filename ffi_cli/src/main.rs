@@ -314,20 +314,34 @@ fn cmd_export(args: &[String]) -> i32 {
 
     // Export Gate 2 Artifacts (Authoritative Log + Validator output)
     let audit_src = Path::new("andna_audit.jsonl");
-    let mut records_validated = 0;
+    let mut val_json = format!(
+        "{{\n  \"status\": \"FAIL\",\n  \"error\": \"No audit log found\",\n  \"records_validated\": 0,\n  \"chain_hash_algorithm\": \"sha3-256\"\n}}"
+    );
+
     if audit_src.exists() {
         let bundle_audit = output_dir.join("andna_audit.jsonl");
         if let Err(e) = fs::copy(audit_src, &bundle_audit) {
             eprintln!("error: cannot copy audit log: {}", e);
         } else if let Ok(content) = fs::read_to_string(audit_src) {
-            records_validated = content.lines().filter(|l| !l.trim().is_empty()).count();
+            let records_validated = content.lines().filter(|l| !l.trim().is_empty()).count();
+            
+            // Actually run the validator!
+            match andna_audit::validate_jsonl(&content) {
+                Ok(_) => {
+                    val_json = format!(
+                        "{{\n  \"status\": \"PASS\",\n  \"records_validated\": {},\n  \"chain_hash_algorithm\": \"sha3-256\"\n}}",
+                        records_validated
+                    );
+                }
+                Err(e) => {
+                    val_json = format!(
+                        "{{\n  \"status\": \"FAIL\",\n  \"error\": \"{:?}\",\n  \"records_validated\": {},\n  \"chain_hash_algorithm\": \"sha3-256\"\n}}",
+                        e, records_validated
+                    );
+                }
+            }
         }
     }
-
-    let val_json = format!(
-        "{{\n  \"status\": \"PASS\",\n  \"records_validated\": {},\n  \"chain_hash_algorithm\": \"sha3-256\"\n}}",
-        records_validated
-    );
     if let Err(e) = fs::write(output_dir.join("audit_validate.json"), val_json) {
         eprintln!("error: cannot write audit_validate.json: {}", e);
     }
