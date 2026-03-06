@@ -121,6 +121,47 @@ jobs:
                 echo "✓ T2 PASSED: Validator correctly caught the tampered log."
               fi
 
+              # ==========================================
+              # GATE 2 T3: ORDER INVARIANCE & PERMUTATION
+              # ==========================================
+              echo "Running Gate 2 T3 Order Invariance Tests..."
+
+              # T3.1: Record Reordering (Swap line 1 and 2)
+              # Proves the validator rejects out-of-order sequences and broken prev_hash links
+              tail -n 1 good_audit.jsonl > andna_audit.jsonl
+              head -n 1 good_audit.jsonl >> andna_audit.jsonl
+              "$BIN" export evidence_t3_swap || true
+              if grep -q PASS evidence_t3_swap/audit_validate.json; then
+                echo "ERROR: T3.1 FAILED! Validator blindly accepted a reordered chain."
+                exit 1
+              else
+                echo "✓ T3.1 PASSED: Validator caught reordered records."
+              fi
+
+              # T3.2: Record Duplication
+              # Proves the validator rejects duplicated sequence numbers and duplicated record_hashes
+              cat good_audit.jsonl > andna_audit.jsonl
+              tail -n 1 good_audit.jsonl >> andna_audit.jsonl
+              "$BIN" export evidence_t3_dup || true
+              if grep -q PASS evidence_t3_dup/audit_validate.json; then
+                echo "ERROR: T3.2 FAILED! Validator blindly accepted duplicated records."
+                exit 1
+              else
+                echo "✓ T3.2 PASSED: Validator caught duplicated records."
+              fi
+
+              # T3.3: Record Deletion (Missing genesis record)
+              # Proves the validator rejects sequence gaps and enforces the 0-based genesis rule
+              tail -n 1 good_audit.jsonl > andna_audit.jsonl
+              "$BIN" export evidence_t3_del || true
+              if grep -q PASS evidence_t3_del/audit_validate.json; then
+                echo "ERROR: T3.3 FAILED! Validator blindly accepted a chain with deleted records."
+                exit 1
+              else
+                echo "✓ T3.3 PASSED: Validator caught deleted records."
+              fi
+
+              # Restore the pristine chain for the final GitHub artifact upload
               mv good_audit.jsonl andna_audit.jsonl
             '
 
