@@ -1,9 +1,7 @@
 use serde::Deserialize;
 
 use crate::canonical::{
-    AuditRecord, MAGIC, VERSION,
-    FLAG_HAS_FRAME, FLAG_RESERVED_MASK,
-    hex_to_32,
+    hex_to_32, AuditRecord, FLAG_HAS_FRAME, FLAG_RESERVED_MASK, MAGIC, VERSION,
 };
 
 #[derive(Debug)]
@@ -22,19 +20,31 @@ pub enum ValidationError {
 }
 
 pub fn validate_records(records: &[AuditRecord]) -> Result<(), ValidationError> {
-    if records.is_empty() { return Err(ValidationError::Empty); }
+    if records.is_empty() {
+        return Err(ValidationError::Empty);
+    }
 
     let run_id = records[0].run_id;
     let mut expected_prev = [0u8; 32];
 
     for (i, r) in records.iter().enumerate() {
-        if r.magic != MAGIC { return Err(ValidationError::BadMagic); }
-        if r.version != VERSION { return Err(ValidationError::BadVersion); }
-        if r.run_id != run_id { return Err(ValidationError::RunIdMismatch); }
+        if r.magic != MAGIC {
+            return Err(ValidationError::BadMagic);
+        }
+        if r.version != VERSION {
+            return Err(ValidationError::BadVersion);
+        }
+        if r.run_id != run_id {
+            return Err(ValidationError::RunIdMismatch);
+        }
 
         let expected_seq = i as u64;
-        if r.seq != expected_seq { return Err(ValidationError::SeqGap { at_seq: r.seq }); }
-        if r.prev_hash != expected_prev { return Err(ValidationError::PrevHashMismatch { at_seq: r.seq }); }
+        if r.seq != expected_seq {
+            return Err(ValidationError::SeqGap { at_seq: r.seq });
+        }
+        if r.prev_hash != expected_prev {
+            return Err(ValidationError::PrevHashMismatch { at_seq: r.seq });
+        }
 
         if (r.notes_flags & FLAG_RESERVED_MASK) != 0 {
             return Err(ValidationError::ReservedBitsSet { at_seq: r.seq });
@@ -78,16 +88,22 @@ pub fn parse_jsonl(jsonl: &str) -> Result<Vec<AuditRecord>, ValidationError> {
     let mut records: Vec<AuditRecord> = Vec::new();
 
     for line in jsonl.lines() {
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
         let jr: JsonRec = serde_json::from_str(line).map_err(|_| ValidationError::JsonParse)?;
 
-        if jr.magic.as_bytes().len() != 8 { return Err(ValidationError::BadMagic); }
+        if jr.magic.as_bytes().len() != 8 {
+            return Err(ValidationError::BadMagic);
+        }
         let mut magic = [0u8; 8];
         magic.copy_from_slice(jr.magic.as_bytes());
 
         let frame_hash = hex_to_32(&jr.frame_hash).map_err(|_| ValidationError::HexDecode)?;
-        let contracts_hash = hex_to_32(&jr.contracts_hash).map_err(|_| ValidationError::HexDecode)?;
-        let lib_version_hash = hex_to_32(&jr.lib_version_hash).map_err(|_| ValidationError::HexDecode)?;
+        let contracts_hash =
+            hex_to_32(&jr.contracts_hash).map_err(|_| ValidationError::HexDecode)?;
+        let lib_version_hash =
+            hex_to_32(&jr.lib_version_hash).map_err(|_| ValidationError::HexDecode)?;
         let prev_hash = hex_to_32(&jr.prev_hash).map_err(|_| ValidationError::HexDecode)?;
         let record_hash = hex_to_32(&jr.record_hash).map_err(|_| ValidationError::HexDecode)?;
 

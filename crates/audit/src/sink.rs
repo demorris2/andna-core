@@ -2,16 +2,15 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::canonical::{
-    AuditRecord, MAGIC, VERSION,
-    FLAG_HAS_FRAME, FLAG_CRYPTO_REAL, FLAG_RESERVED_MASK,
-    sha3_256, sha3_256_str,
+    sha3_256, sha3_256_str, AuditRecord, FLAG_CRYPTO_REAL, FLAG_HAS_FRAME, FLAG_RESERVED_MASK,
+    MAGIC, VERSION,
 };
 
 #[derive(Clone, Debug)]
 pub struct VerifyEventInput<'a> {
     pub ts_unix_ms: u64,
-    pub decision: u8,      // 0/1
-    pub engine: u8,        // 0 python, 1 rust
+    pub decision: u8, // 0/1
+    pub engine: u8,   // 0 python, 1 rust
     pub err_code: i32,
     pub notes_flags: u32,
     pub frame_bytes: Option<&'a [u8]>, // if None => HAS_FRAME must be 0 and frame_hash zeros
@@ -117,7 +116,8 @@ impl AuditSink {
 }
 
 fn now_unix_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
@@ -132,7 +132,10 @@ fn make_run_id() -> u64 {
 fn contracts_header_hash() -> [u8; 32] {
     // Uses committed generated header as machine-checkable SoT.
     // Path: crates/audit/../../include/andna_vnext_contracts.h
-    let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../include/andna_vnext_contracts.h"));
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../include/andna_vnext_contracts.h"
+    ));
     sha3_256(bytes)
 }
 
@@ -142,7 +145,7 @@ static GLOBAL: OnceLock<Mutex<AuditSink>> = OnceLock::new();
 pub fn init_sink_if_needed(lib_version_str: &str) -> &'static Mutex<AuditSink> {
     GLOBAL.get_or_init(|| {
         let mut sink = AuditSink::new(lib_version_str);
-        
+
         // Auto-restore state from Gate 2 log if it exists to maintain the chain across CLI runs
         if let Ok(content) = std::fs::read_to_string("andna_audit.jsonl") {
             if let Ok(records) = crate::validator::parse_jsonl(&content) {
@@ -154,7 +157,7 @@ pub fn init_sink_if_needed(lib_version_str: &str) -> &'static Mutex<AuditSink> {
                 }
             }
         }
-        
+
         Mutex::new(sink)
     })
 }
@@ -164,4 +167,6 @@ pub fn global_sink() -> &'static Mutex<AuditSink> {
     init_sink_if_needed(env!("CARGO_PKG_VERSION"))
 }
 
-pub fn now_ms() -> u64 { now_unix_ms() }
+pub fn now_ms() -> u64 {
+    now_unix_ms()
+}

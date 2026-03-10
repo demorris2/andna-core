@@ -72,7 +72,9 @@ pub fn check_pk_hash_binding(
 ///
 /// The 16-byte UUID in T_E is the native hardware root.
 /// The 32-byte ID in mu_pre is the mathematically expanded payload slot.
-pub fn device_id32_from_id16(device_id16: &[u8; TE_DEVICE_ID16_LEN]) -> [u8; MU_PRE_DEVICE_ID32_LEN] {
+pub fn device_id32_from_id16(
+    device_id16: &[u8; TE_DEVICE_ID16_LEN],
+) -> [u8; MU_PRE_DEVICE_ID32_LEN] {
     let mut hasher = Shake256::default();
     hasher.update(device_id16);
     let mut out = [0u8; MU_PRE_DEVICE_ID32_LEN];
@@ -89,13 +91,9 @@ pub fn check_epoch_correlation(
     te: &[u8; TE_LEN],
 ) -> Result<(), TranscriptError> {
     let mut mp_epoch_bytes = [0u8; 8];
-    mp_epoch_bytes.copy_from_slice(
-        &mu_pre[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + MU_PRE_EPOCH_LEN],
-    );
+    mp_epoch_bytes.copy_from_slice(&mu_pre[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + MU_PRE_EPOCH_LEN]);
     let mut te_epoch_bytes = [0u8; 8];
-    te_epoch_bytes.copy_from_slice(
-        &te[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN],
-    );
+    te_epoch_bytes.copy_from_slice(&te[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN]);
 
     // Constant-time comparison of the 8 epoch bytes
     if mp_epoch_bytes.ct_eq(&te_epoch_bytes).into() {
@@ -113,12 +111,13 @@ pub fn check_device_id_duality(
     mu_pre: &[u8; MU_PRE_LEN],
     te: &[u8; TE_LEN],
 ) -> Result<(), TranscriptError> {
-    let embedded_id32 = &mu_pre[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN];
+    let embedded_id32 =
+        &mu_pre[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN];
 
-    let device_id16: &[u8; TE_DEVICE_ID16_LEN] =
-        te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN]
-            .try_into()
-            .expect("compile-time size guarantees this");
+    let device_id16: &[u8; TE_DEVICE_ID16_LEN] = te
+        [TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN]
+        .try_into()
+        .expect("compile-time size guarantees this");
 
     let mut expected = device_id32_from_id16(device_id16);
     let eq = embedded_id32.ct_eq(&expected);
@@ -145,27 +144,21 @@ mod tests {
 
     /// KAT-T0: pk_hash = SHAKE256(zeros(1336), 64)
     const KAT_T0_PK_HASH: [u8; 64] = [
-        0x0f, 0x32, 0xd8, 0xb3, 0x56, 0x85, 0x27, 0x04,
-        0x9e, 0x8d, 0x40, 0xf3, 0xca, 0x7a, 0xa2, 0xc9,
-        0x24, 0xe3, 0x5d, 0xdd, 0x64, 0x98, 0xe5, 0x84,
-        0xf1, 0xd9, 0xec, 0x34, 0x39, 0x4f, 0x3b, 0xc4,
-        0x2e, 0x32, 0x22, 0x67, 0x5c, 0xc3, 0x63, 0xe0,
-        0x63, 0x78, 0x9d, 0xaa, 0x9e, 0xf6, 0x1a, 0x89,
-        0x94, 0x82, 0xc3, 0x9c, 0xad, 0xa2, 0x14, 0xd9,
-        0x84, 0xfd, 0x94, 0xbe, 0x5b, 0xb4, 0xb5, 0x29,
+        0x0f, 0x32, 0xd8, 0xb3, 0x56, 0x85, 0x27, 0x04, 0x9e, 0x8d, 0x40, 0xf3, 0xca, 0x7a, 0xa2,
+        0xc9, 0x24, 0xe3, 0x5d, 0xdd, 0x64, 0x98, 0xe5, 0x84, 0xf1, 0xd9, 0xec, 0x34, 0x39, 0x4f,
+        0x3b, 0xc4, 0x2e, 0x32, 0x22, 0x67, 0x5c, 0xc3, 0x63, 0xe0, 0x63, 0x78, 0x9d, 0xaa, 0x9e,
+        0xf6, 0x1a, 0x89, 0x94, 0x82, 0xc3, 0x9c, 0xad, 0xa2, 0x14, 0xd9, 0x84, 0xfd, 0x94, 0xbe,
+        0x5b, 0xb4, 0xb5, 0x29,
     ];
 
     /// KAT-T1: pk_hash = SHAKE256(patterned_te, 64)
     /// T_E: rho = 01..20, t1 = 0xAA×1280, epoch = 5 LE, id16 = 0xBB×16
     const KAT_T1_PK_HASH: [u8; 64] = [
-        0xf4, 0x33, 0x80, 0x86, 0xd8, 0xc1, 0x14, 0x8d,
-        0xaa, 0x60, 0x8e, 0xd1, 0x72, 0x8e, 0x63, 0xe7,
-        0x0f, 0x87, 0xc0, 0xe6, 0xdf, 0x1c, 0x1a, 0x17,
-        0xaf, 0xa5, 0x6c, 0xb4, 0x2c, 0x56, 0x36, 0x5d,
-        0xdb, 0xad, 0x5c, 0xc2, 0x4d, 0x39, 0xbb, 0x64,
-        0x30, 0xae, 0x16, 0x77, 0xbe, 0xe3, 0x63, 0x7a,
-        0xcc, 0x88, 0x6f, 0xd2, 0xe0, 0x87, 0xd8, 0xe2,
-        0x8f, 0x16, 0x0c, 0xe0, 0xb6, 0x4a, 0xc8, 0x74,
+        0xf4, 0x33, 0x80, 0x86, 0xd8, 0xc1, 0x14, 0x8d, 0xaa, 0x60, 0x8e, 0xd1, 0x72, 0x8e, 0x63,
+        0xe7, 0x0f, 0x87, 0xc0, 0xe6, 0xdf, 0x1c, 0x1a, 0x17, 0xaf, 0xa5, 0x6c, 0xb4, 0x2c, 0x56,
+        0x36, 0x5d, 0xdb, 0xad, 0x5c, 0xc2, 0x4d, 0x39, 0xbb, 0x64, 0x30, 0xae, 0x16, 0x77, 0xbe,
+        0xe3, 0x63, 0x7a, 0xcc, 0x88, 0x6f, 0xd2, 0xe0, 0x87, 0xd8, 0xe2, 0x8f, 0x16, 0x0c, 0xe0,
+        0xb6, 0x4a, 0xc8, 0x74,
     ];
 
     /// KAT-T2: mu = SHAKE256(known_mu_pre, 64)
@@ -173,14 +166,11 @@ mod tests {
     /// device_id32=0xCC, epoch=5, sid=0xDD, N_d=0xEE, N_s=0xFF,
     /// ctx_hash=0x11, policy_hash=0x00
     const KAT_T2_MU: [u8; 64] = [
-        0xa5, 0x08, 0xef, 0xbf, 0x68, 0x0d, 0x8c, 0x7f,
-        0x32, 0x88, 0x00, 0x43, 0x4e, 0x09, 0xe7, 0x38,
-        0x60, 0x7f, 0x4a, 0xfc, 0x2b, 0xde, 0x2e, 0xc8,
-        0x03, 0x5d, 0x09, 0x2d, 0xdb, 0xab, 0x0d, 0xb0,
-        0xcb, 0x5c, 0xba, 0xac, 0x71, 0x6a, 0xc2, 0x80,
-        0x38, 0xf2, 0xec, 0xa2, 0xb7, 0xe1, 0x96, 0x50,
-        0xaf, 0x2d, 0x1c, 0xe1, 0xa1, 0xb8, 0x9c, 0xa9,
-        0x59, 0xcd, 0x1c, 0x5a, 0xfe, 0xbb, 0x21, 0x3a,
+        0xa5, 0x08, 0xef, 0xbf, 0x68, 0x0d, 0x8c, 0x7f, 0x32, 0x88, 0x00, 0x43, 0x4e, 0x09, 0xe7,
+        0x38, 0x60, 0x7f, 0x4a, 0xfc, 0x2b, 0xde, 0x2e, 0xc8, 0x03, 0x5d, 0x09, 0x2d, 0xdb, 0xab,
+        0x0d, 0xb0, 0xcb, 0x5c, 0xba, 0xac, 0x71, 0x6a, 0xc2, 0x80, 0x38, 0xf2, 0xec, 0xa2, 0xb7,
+        0xe1, 0x96, 0x50, 0xaf, 0x2d, 0x1c, 0xe1, 0xa1, 0xb8, 0x9c, 0xa9, 0x59, 0xcd, 0x1c, 0x5a,
+        0xfe, 0xbb, 0x21, 0x3a,
     ];
 
     // ── Helper: build KAT-T1 T_E ──
@@ -194,11 +184,9 @@ mod tests {
         // t1 = 0xAA × 1280
         te[TE_T1_OFF..TE_T1_OFF + TE_T1_LEN].fill(0xAA);
         // epoch = 5 LE
-        te[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN]
-            .copy_from_slice(&5u64.to_le_bytes());
+        te[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN].copy_from_slice(&5u64.to_le_bytes());
         // device_id16 = 0xBB × 16
-        te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN]
-            .fill(0xBB);
+        te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN].fill(0xBB);
         te
     }
 
@@ -206,22 +194,18 @@ mod tests {
 
     fn build_kat_t2_mu_pre(pk_hash: &[u8; PK_HASH_LEN]) -> [u8; MU_PRE_LEN] {
         let mut mp = [0u8; MU_PRE_LEN];
-        mp[MU_PRE_PK_HASH_OFF..MU_PRE_PK_HASH_OFF + PK_HASH_LEN]
-            .copy_from_slice(pk_hash);
+        mp[MU_PRE_PK_HASH_OFF..MU_PRE_PK_HASH_OFF + PK_HASH_LEN].copy_from_slice(pk_hash);
         mp[MU_PRE_DOMAIN_SEP_OFF..MU_PRE_DOMAIN_SEP_OFF + DOMAIN_SEP_LEN]
             .copy_from_slice(&DOMAIN_SEP);
         mp[MU_PRE_VERSION_OFF] = MU_PRE_VERSION_VAL;
-        mp[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN]
-            .fill(0xCC);
+        mp[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN].fill(0xCC);
         mp[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + MU_PRE_EPOCH_LEN]
             .copy_from_slice(&5u64.to_le_bytes());
         mp[MU_PRE_SID_OFF..MU_PRE_SID_OFF + MU_PRE_SID_LEN].fill(0xDD);
         mp[MU_PRE_ND_OFF..MU_PRE_ND_OFF + MU_PRE_ND_LEN].fill(0xEE);
         mp[MU_PRE_NS_OFF..MU_PRE_NS_OFF + MU_PRE_NS_LEN].fill(0xFF);
-        mp[MU_PRE_CTX_HASH_OFF..MU_PRE_CTX_HASH_OFF + MU_PRE_CTX_HASH_LEN]
-            .fill(0x11);
-        mp[MU_PRE_POLICY_HASH_OFF..MU_PRE_POLICY_HASH_OFF + MU_PRE_POLICY_HASH_LEN]
-            .fill(0x00);
+        mp[MU_PRE_CTX_HASH_OFF..MU_PRE_CTX_HASH_OFF + MU_PRE_CTX_HASH_LEN].fill(0x11);
+        mp[MU_PRE_POLICY_HASH_OFF..MU_PRE_POLICY_HASH_OFF + MU_PRE_POLICY_HASH_LEN].fill(0x00);
         mp
     }
 
@@ -404,8 +388,7 @@ mod tests {
         pk_hash_from_te(&te, &mut pk_hash);
         let mut mu_pre = build_kat_t2_mu_pre(&pk_hash);
         // Tamper mu_pre epoch to 99
-        mu_pre[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + 8]
-            .copy_from_slice(&99u64.to_le_bytes());
+        mu_pre[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + 8].copy_from_slice(&99u64.to_le_bytes());
         assert_eq!(
             check_epoch_correlation(&mu_pre, &te),
             Err(TranscriptError::EpochMismatch),
@@ -439,8 +422,7 @@ mod tests {
 
         // Build T_E with this device_id16
         let mut te = [0u8; TE_LEN];
-        te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN]
-            .copy_from_slice(&id16);
+        te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN].copy_from_slice(&id16);
 
         // Build mu_pre with the correctly derived device_id32
         let mut pk_hash = [0u8; PK_HASH_LEN];
@@ -461,8 +443,7 @@ mod tests {
         let id16 = [0xBBu8; TE_DEVICE_ID16_LEN];
 
         let mut te = [0u8; TE_LEN];
-        te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN]
-            .copy_from_slice(&id16);
+        te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN].copy_from_slice(&id16);
 
         // Build mu_pre with WRONG device_id32 (raw 0xCC instead of SHAKE256)
         let mut pk_hash = [0u8; PK_HASH_LEN];
@@ -472,8 +453,7 @@ mod tests {
         mu_pre[MU_PRE_DOMAIN_SEP_OFF..MU_PRE_DOMAIN_SEP_OFF + DOMAIN_SEP_LEN]
             .copy_from_slice(&DOMAIN_SEP);
         mu_pre[MU_PRE_VERSION_OFF] = MU_PRE_VERSION_VAL;
-        mu_pre[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN]
-            .fill(0xCC); // raw bytes, NOT SHAKE256(id16)
+        mu_pre[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN].fill(0xCC); // raw bytes, NOT SHAKE256(id16)
 
         assert_eq!(
             check_device_id_duality(&mu_pre, &te),

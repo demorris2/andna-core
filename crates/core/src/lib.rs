@@ -8,14 +8,14 @@
 #![forbid(unsafe_code)]
 
 use andna_contracts::*;
-use andna_transcript::{self, TranscriptError};
 use andna_mldsa44::{self, MlDsa44Error};
+use andna_transcript::{self, TranscriptError};
 use zeroize::Zeroize;
 
 // Re-export codec types for convenience
 pub use andna_codec::{
-    unpack_frame_v2, parse_mu_pre_header, parse_te_meta,
-    FrameV2Ref, MuPreHeader, TeMeta, CodecError,
+    parse_mu_pre_header, parse_te_meta, unpack_frame_v2, CodecError, FrameV2Ref, MuPreHeader,
+    TeMeta,
 };
 
 /// Unified error type for the verify pipeline.
@@ -141,9 +141,10 @@ mod tests {
         mu_pre[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + MU_PRE_EPOCH_LEN]
             .copy_from_slice(&te[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN]);
         // Device ID = SHAKE256(T_E.device_id16, 32) (Directive E)
-        let device_id16: &[u8; TE_DEVICE_ID16_LEN] =
-            te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN]
-                .try_into().unwrap();
+        let device_id16: &[u8; TE_DEVICE_ID16_LEN] = te
+            [TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN]
+            .try_into()
+            .unwrap();
         let device_id32 = andna_transcript::device_id32_from_id16(device_id16);
         mu_pre[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN]
             .copy_from_slice(&device_id32);
@@ -153,8 +154,7 @@ mod tests {
     /// Build a T_E with specific epoch and device_id16 (for test control).
     fn make_te(epoch: u64, device_id16: &[u8; TE_DEVICE_ID16_LEN]) -> [u8; TE_LEN] {
         let mut te = [0x42u8; TE_LEN];
-        te[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN]
-            .copy_from_slice(&epoch.to_le_bytes());
+        te[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN].copy_from_slice(&epoch.to_le_bytes());
         te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN]
             .copy_from_slice(device_id16);
         te
@@ -170,7 +170,10 @@ mod tests {
             .copy_from_slice(&DOMAIN_SEP);
         mu_pre[MU_PRE_VERSION_OFF] = MU_PRE_VERSION_VAL;
         let sig = [0u8; SIG_LEN];
-        assert_eq!(verify_vnext(&mu_pre, &te, &sig), Err(VerifyError::PkHashMismatch));
+        assert_eq!(
+            verify_vnext(&mu_pre, &te, &sig),
+            Err(VerifyError::PkHashMismatch)
+        );
     }
 
     #[test]
@@ -180,7 +183,10 @@ mod tests {
         let mut mu_pre = make_bound_mu_pre(&te);
         mu_pre[MU_PRE_DOMAIN_SEP_OFF] = 0x00; // corrupt first byte of "ANDNAAUTH"
         let sig = [0u8; SIG_LEN];
-        assert_eq!(verify_vnext(&mu_pre, &te, &sig), Err(VerifyError::MuPreMalformed));
+        assert_eq!(
+            verify_vnext(&mu_pre, &te, &sig),
+            Err(VerifyError::MuPreMalformed)
+        );
     }
 
     #[test]
@@ -190,7 +196,10 @@ mod tests {
         let mut mu_pre = make_bound_mu_pre(&te);
         mu_pre[MU_PRE_VERSION_OFF] = 0xFF;
         let sig = [0u8; SIG_LEN];
-        assert_eq!(verify_vnext(&mu_pre, &te, &sig), Err(VerifyError::MuPreMalformed));
+        assert_eq!(
+            verify_vnext(&mu_pre, &te, &sig),
+            Err(VerifyError::MuPreMalformed)
+        );
     }
 
     #[test]
@@ -202,7 +211,10 @@ mod tests {
         mu_pre[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + MU_PRE_EPOCH_LEN]
             .copy_from_slice(&99u64.to_le_bytes());
         let sig = [0u8; SIG_LEN];
-        assert_eq!(verify_vnext(&mu_pre, &te, &sig), Err(VerifyError::EpochMismatch));
+        assert_eq!(
+            verify_vnext(&mu_pre, &te, &sig),
+            Err(VerifyError::EpochMismatch)
+        );
     }
 
     #[test]
@@ -211,15 +223,20 @@ mod tests {
         let te = make_te(1, &[0xBB; TE_DEVICE_ID16_LEN]);
         let mut mu_pre = make_bound_mu_pre(&te);
         // Tamper device_id32 (write raw bytes instead of SHAKE256)
-        mu_pre[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN]
-            .fill(0xCC);
+        mu_pre[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN].fill(0xCC);
         let sig = [0u8; SIG_LEN];
-        assert_eq!(verify_vnext(&mu_pre, &te, &sig), Err(VerifyError::DeviceIdMismatch));
+        assert_eq!(
+            verify_vnext(&mu_pre, &te, &sig),
+            Err(VerifyError::DeviceIdMismatch)
+        );
     }
 
     #[test]
     fn verify_frame_v2_rejects_short() {
-        assert_eq!(verify_frame_v2(&[0u8; 100]), Err(VerifyError::LengthMismatch));
+        assert_eq!(
+            verify_frame_v2(&[0u8; 100]),
+            Err(VerifyError::LengthMismatch)
+        );
     }
 
     // ── Stub-only tests (zero-filled sig passes with stub) ──
@@ -254,20 +271,18 @@ mod tests {
         /// Build a real frame: keygen → build T_E → build mu_pre → sign μ → pack.
         fn make_real_frame() -> ([u8; FRAME_V2_LEN], Vec<u8>, Vec<u8>) {
             oqs::init();
-            let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
-                .expect("ML-DSA-44 not available");
+            let scheme =
+                oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44).expect("ML-DSA-44 not available");
 
             let (pk, sk) = scheme.keypair().expect("keygen failed");
             let pk_bytes = pk.as_ref();
 
             // Build T_E from pk components + metadata
             let mut te = [0u8; TE_LEN];
-            te[TE_RHO_OFF..TE_RHO_OFF + TE_RHO_LEN]
-                .copy_from_slice(&pk_bytes[..TE_RHO_LEN]);
+            te[TE_RHO_OFF..TE_RHO_OFF + TE_RHO_LEN].copy_from_slice(&pk_bytes[..TE_RHO_LEN]);
             te[TE_T1_OFF..TE_T1_OFF + TE_T1_LEN]
                 .copy_from_slice(&pk_bytes[TE_RHO_LEN..TE_RHO_LEN + TE_T1_LEN]);
-            te[TE_EPOCH_OFF..TE_EPOCH_OFF + 8]
-                .copy_from_slice(&1u64.to_le_bytes());
+            te[TE_EPOCH_OFF..TE_EPOCH_OFF + 8].copy_from_slice(&1u64.to_le_bytes());
             te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN]
                 .copy_from_slice(&[0xCCu8; TE_DEVICE_ID16_LEN]);
 
@@ -280,8 +295,8 @@ mod tests {
 
             // Sign μ with real ML-DSA-44
             let signature = scheme.sign(&mu, &sk).expect("sign failed");
-            let sig_bytes: &[u8; SIG_LEN] = signature.as_ref()
-                .try_into().expect("sig length mismatch");
+            let sig_bytes: &[u8; SIG_LEN] =
+                signature.as_ref().try_into().expect("sig length mismatch");
 
             // Pack frame
             let mut frame = [0u8; FRAME_V2_LEN];
@@ -293,8 +308,10 @@ mod tests {
         #[test]
         fn verify_vnext_real_sig() {
             let (frame, _, _) = make_real_frame();
-            assert!(verify_frame_v2(&frame).is_ok(),
-                "real ML-DSA-44 sig through full pipeline should pass");
+            assert!(
+                verify_frame_v2(&frame).is_ok(),
+                "real ML-DSA-44 sig through full pipeline should pass"
+            );
         }
 
         #[test]
@@ -316,7 +333,7 @@ mod tests {
             // Re-pack with different T_E (breaks pk_hash binding)
             let mut bad_frame = frame;
             bad_frame[MU_PRE_LEN] ^= 0xFF; // flip byte in T_E
-            // pk_hash in mu_pre no longer matches, so pk_hash check fails first
+                                           // pk_hash in mu_pre no longer matches, so pk_hash check fails first
             assert_eq!(
                 verify_frame_v2(&bad_frame),
                 Err(VerifyError::PkHashMismatch),

@@ -14,8 +14,8 @@
 
 #[cfg(feature = "oqs-backend")]
 mod acvp {
-    use andna_mldsa44::{verify_pk, MlDsa44Error, ML_DSA_44_PK_LEN};
     use andna_contracts::SIG_LEN;
+    use andna_mldsa44::{verify_pk, MlDsa44Error, ML_DSA_44_PK_LEN};
 
     /// One ACVP sigVer test case.
     struct AcvpVector {
@@ -29,8 +29,8 @@ mod acvp {
     /// Parse the vendored JSON vectors.
     fn load_acvp_vectors() -> Vec<AcvpVector> {
         let json_str = include_str!("vectors/acvp_mldsa44_sigver.json");
-        let arr: serde_json::Value = serde_json::from_str(json_str)
-            .expect("ACVP vector JSON parse failed");
+        let arr: serde_json::Value =
+            serde_json::from_str(json_str).expect("ACVP vector JSON parse failed");
 
         let entries = arr.as_array().expect("ACVP JSON must be an array");
 
@@ -52,7 +52,13 @@ mod acvp {
                 let message = hex::decode(msg_hex).ok()?;
                 let signature = hex::decode(sig_hex).ok()?;
 
-                Some(AcvpVector { tc_id, pk, message, signature, expected })
+                Some(AcvpVector {
+                    tc_id,
+                    pk,
+                    message,
+                    signature,
+                    expected,
+                })
             })
             .collect()
     }
@@ -84,18 +90,17 @@ mod acvp {
                 fail += 1;
                 eprintln!(
                     "ACVP tcId={}: MISMATCH — expected={}, got={}  (err={:?})",
-                    v.tc_id, v.expected, got_pass, result.err()
+                    v.tc_id,
+                    v.expected,
+                    got_pass,
+                    result.err()
                 );
             } else {
                 pass += 1;
             }
         }
 
-        eprintln!(
-            "\nACVP ML-DSA-44 sigVer: {}/{} passed",
-            pass,
-            pass + fail
-        );
+        eprintln!("\nACVP ML-DSA-44 sigVer: {}/{} passed", pass, pass + fail);
         assert_eq!(fail, 0, "{} ACVP vector(s) failed", fail);
     }
 
@@ -105,17 +110,17 @@ mod acvp {
     fn self_gen_sign_verify_accept() {
         // Generate keypair, sign a message, verify it accepts
         oqs::init();
-        let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
-            .expect("ML-DSA-44 unavailable");
+        let scheme =
+            oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44).expect("ML-DSA-44 unavailable");
 
         let (pk, sk) = scheme.keypair().expect("keygen failed");
 
         // Test with several message lengths
         let messages: &[&[u8]] = &[
-            b"",                              // empty message
-            b"A",                             // 1 byte
-            &[0x42u8; 64],                    // 64 bytes (μ-sized)
-            &[0xAA; 1000],                    // 1000 bytes
+            b"",           // empty message
+            b"A",          // 1 byte
+            &[0x42u8; 64], // 64 bytes (μ-sized)
+            &[0xAA; 1000], // 1000 bytes
         ];
 
         for (i, msg) in messages.iter().enumerate() {
@@ -124,7 +129,9 @@ mod acvp {
             assert!(
                 result.is_ok(),
                 "self-gen vector {} (msg len={}) should pass: {:?}",
-                i, msg.len(), result
+                i,
+                msg.len(),
+                result
             );
         }
     }
@@ -132,8 +139,8 @@ mod acvp {
     #[test]
     fn self_gen_tampered_sig_reject() {
         oqs::init();
-        let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
-            .expect("ML-DSA-44 unavailable");
+        let scheme =
+            oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44).expect("ML-DSA-44 unavailable");
 
         let (pk, sk) = scheme.keypair().expect("keygen failed");
         let msg = [0x42u8; 64];
@@ -155,8 +162,8 @@ mod acvp {
     #[test]
     fn self_gen_wrong_pk_reject() {
         oqs::init();
-        let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
-            .expect("ML-DSA-44 unavailable");
+        let scheme =
+            oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44).expect("ML-DSA-44 unavailable");
 
         let (pk1, sk1) = scheme.keypair().expect("keygen 1 failed");
         let (pk2, _sk2) = scheme.keypair().expect("keygen 2 failed");
@@ -178,12 +185,12 @@ mod acvp {
     #[test]
     fn self_gen_verify_via_andna_pipeline_interface() {
         // Test through the AN-DNA interface: verify(rho, t1, mu, sig)
+        use andna_contracts::{MU_LEN, TE_RHO_LEN, TE_T1_LEN};
         use andna_mldsa44::verify;
-        use andna_contracts::{TE_RHO_LEN, TE_T1_LEN, MU_LEN};
 
         oqs::init();
-        let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
-            .expect("ML-DSA-44 unavailable");
+        let scheme =
+            oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44).expect("ML-DSA-44 unavailable");
 
         let (pk, sk) = scheme.keypair().expect("keygen failed");
         let pk_bytes = pk.as_ref();
@@ -205,8 +212,8 @@ mod acvp {
     #[test]
     fn liboqs_lengths_are_locked() {
         oqs::init();
-        let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
-            .expect("ML-DSA-44 unavailable");
+        let scheme =
+            oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44).expect("ML-DSA-44 unavailable");
 
         assert_eq!(
             scheme.length_public_key(),

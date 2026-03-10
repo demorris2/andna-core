@@ -45,11 +45,14 @@ pub fn unpack_frame_v2(frame: &[u8]) -> Result<FrameV2Ref<'_>, CodecError> {
         return Err(CodecError::LengthMismatch);
     }
     let mu_pre: &[u8; MU_PRE_LEN] = frame[FRAME_V2_MU_PRE_OFF..FRAME_V2_MU_PRE_OFF + MU_PRE_LEN]
-        .try_into().map_err(|_| CodecError::LengthMismatch)?;
+        .try_into()
+        .map_err(|_| CodecError::LengthMismatch)?;
     let te: &[u8; TE_LEN] = frame[FRAME_V2_TE_OFF..FRAME_V2_TE_OFF + TE_LEN]
-        .try_into().map_err(|_| CodecError::LengthMismatch)?;
+        .try_into()
+        .map_err(|_| CodecError::LengthMismatch)?;
     let sig: &[u8; SIG_LEN] = frame[FRAME_V2_SIG_OFF..FRAME_V2_SIG_OFF + SIG_LEN]
-        .try_into().map_err(|_| CodecError::LengthMismatch)?;
+        .try_into()
+        .map_err(|_| CodecError::LengthMismatch)?;
     Ok(FrameV2Ref { mu_pre, te, sig })
 }
 
@@ -68,13 +71,9 @@ pub fn parse_mu_pre_header(mu_pre: &[u8; MU_PRE_LEN]) -> Result<MuPreHeader, Cod
         &mu_pre[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN],
     );
     let mut epoch_bytes = [0u8; 8];
-    epoch_bytes.copy_from_slice(
-        &mu_pre[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + MU_PRE_EPOCH_LEN],
-    );
+    epoch_bytes.copy_from_slice(&mu_pre[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + MU_PRE_EPOCH_LEN]);
     let mut sid = [0u8; 32];
-    sid.copy_from_slice(
-        &mu_pre[MU_PRE_SID_OFF..MU_PRE_SID_OFF + MU_PRE_SID_LEN],
-    );
+    sid.copy_from_slice(&mu_pre[MU_PRE_SID_OFF..MU_PRE_SID_OFF + MU_PRE_SID_LEN]);
 
     Ok(MuPreHeader {
         device_id32,
@@ -89,7 +88,10 @@ pub fn parse_te_meta(te: &[u8; TE_LEN]) -> Result<TeMeta, CodecError> {
     epoch_bytes.copy_from_slice(&te[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN]);
     let mut device_id16 = [0u8; 16];
     device_id16.copy_from_slice(&te[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN]);
-    Ok(TeMeta { epoch: u64::from_le_bytes(epoch_bytes), device_id16 })
+    Ok(TeMeta {
+        epoch: u64::from_le_bytes(epoch_bytes),
+        device_id16,
+    })
 }
 
 /// Pack components into a v2 frame buffer.
@@ -119,8 +121,14 @@ mod tests {
 
     #[test]
     fn rejects_wrong_length() {
-        assert_eq!(unpack_frame_v2(&[0u8; 100]), Err(CodecError::LengthMismatch));
-        assert_eq!(unpack_frame_v2(&[0u8; 4031]), Err(CodecError::LengthMismatch));
+        assert_eq!(
+            unpack_frame_v2(&[0u8; 100]),
+            Err(CodecError::LengthMismatch)
+        );
+        assert_eq!(
+            unpack_frame_v2(&[0u8; 4031]),
+            Err(CodecError::LengthMismatch)
+        );
     }
 
     #[test]

@@ -64,15 +64,11 @@ mod backend {
     }
 
     /// Verify an ML-DSA-44 signature using the packed public key.
-    pub fn verify_pk(
-        pk: &[u8],
-        message: &[u8],
-        sig: &[u8],
-    ) -> Result<(), MlDsa44Error> {
+    pub fn verify_pk(pk: &[u8], message: &[u8], sig: &[u8]) -> Result<(), MlDsa44Error> {
         ensure_init();
 
-        let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
-            .map_err(|_| MlDsa44Error::Internal)?;
+        let scheme =
+            oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44).map_err(|_| MlDsa44Error::Internal)?;
 
         if pk.len() != scheme.length_public_key() {
             return Err(MlDsa44Error::PublicKeyMalformed);
@@ -103,11 +99,7 @@ mod backend {
     use super::*;
 
     /// Stub: always passes. For CI/testing environments without liboqs.
-    pub fn verify_pk(
-        pk: &[u8],
-        message: &[u8],
-        sig: &[u8],
-    ) -> Result<(), MlDsa44Error> {
+    pub fn verify_pk(pk: &[u8], message: &[u8], sig: &[u8]) -> Result<(), MlDsa44Error> {
         if pk.len() != ML_DSA_44_PK_LEN {
             return Err(MlDsa44Error::PublicKeyMalformed);
         }
@@ -135,11 +127,7 @@ compile_error!(
 
 /// Verify an ML-DSA-44 signature using the packed public key and
 /// arbitrary-length message. This is the ACVP-testable entry point.
-pub fn verify_pk(
-    pk: &[u8],
-    message: &[u8],
-    sig: &[u8],
-) -> Result<(), MlDsa44Error> {
+pub fn verify_pk(pk: &[u8], message: &[u8], sig: &[u8]) -> Result<(), MlDsa44Error> {
     backend::verify_pk(pk, message, sig)
 }
 
@@ -283,12 +271,11 @@ mod tests {
             let mu = [0x42u8; MU_LEN];
             let signature = scheme.sign(&mu, &sk).expect("sign failed");
 
-            let rho: &[u8; TE_RHO_LEN] = pk_bytes[..TE_RHO_LEN]
-                .try_into().unwrap();
+            let rho: &[u8; TE_RHO_LEN] = pk_bytes[..TE_RHO_LEN].try_into().unwrap();
             let t1: &[u8; TE_T1_LEN] = pk_bytes[TE_RHO_LEN..TE_RHO_LEN + TE_T1_LEN]
-                .try_into().unwrap();
-            let sig_bytes: &[u8; SIG_LEN] = signature.as_ref()
-                .try_into().unwrap();
+                .try_into()
+                .unwrap();
+            let sig_bytes: &[u8; SIG_LEN] = signature.as_ref().try_into().unwrap();
 
             assert!(verify(rho, t1, &mu, sig_bytes).is_ok());
         }
@@ -299,10 +286,16 @@ mod tests {
             let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
                 .expect("ML-DSA-44 not available in liboqs");
 
-            assert_eq!(scheme.length_public_key(), ML_DSA_44_PK_LEN,
-                "liboqs pk len != our ML_DSA_44_PK_LEN");
-            assert_eq!(scheme.length_signature(), SIG_LEN,
-                "liboqs sig len != our SIG_LEN");
+            assert_eq!(
+                scheme.length_public_key(),
+                ML_DSA_44_PK_LEN,
+                "liboqs pk len != our ML_DSA_44_PK_LEN"
+            );
+            assert_eq!(
+                scheme.length_signature(),
+                SIG_LEN,
+                "liboqs sig len != our SIG_LEN"
+            );
         }
     }
 }

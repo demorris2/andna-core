@@ -67,7 +67,9 @@ fn generate_header() -> String {
     h.push_str("static const uint8_t ANDNA_DOMAIN_SEP[9] = {\n");
     h.push_str("    ");
     for (i, &b) in DOMAIN_SEP.iter().enumerate() {
-        if i > 0 { h.push_str(", "); }
+        if i > 0 {
+            h.push_str(", ");
+        }
         h.push_str(&format!("0x{:02X}", b));
     }
     h.push_str("\n}; /* ");
@@ -89,8 +91,16 @@ fn generate_header() -> String {
     emit_usize(&mut h, "ANDNA_MU_PRE_VERSION_OFF", MU_PRE_VERSION_OFF);
     emit_usize(&mut h, "ANDNA_MU_PRE_VERSION_LEN", MU_PRE_VERSION_LEN);
     emit_u8(&mut h, "ANDNA_MU_PRE_VERSION_VAL", MU_PRE_VERSION_VAL);
-    emit_usize(&mut h, "ANDNA_MU_PRE_DEVICE_ID32_OFF", MU_PRE_DEVICE_ID32_OFF);
-    emit_usize(&mut h, "ANDNA_MU_PRE_DEVICE_ID32_LEN", MU_PRE_DEVICE_ID32_LEN);
+    emit_usize(
+        &mut h,
+        "ANDNA_MU_PRE_DEVICE_ID32_OFF",
+        MU_PRE_DEVICE_ID32_OFF,
+    );
+    emit_usize(
+        &mut h,
+        "ANDNA_MU_PRE_DEVICE_ID32_LEN",
+        MU_PRE_DEVICE_ID32_LEN,
+    );
     emit_usize(&mut h, "ANDNA_MU_PRE_EPOCH_OFF", MU_PRE_EPOCH_OFF);
     emit_usize(&mut h, "ANDNA_MU_PRE_EPOCH_LEN", MU_PRE_EPOCH_LEN);
     emit_usize(&mut h, "ANDNA_MU_PRE_SID_OFF", MU_PRE_SID_OFF);
@@ -101,8 +111,16 @@ fn generate_header() -> String {
     emit_usize(&mut h, "ANDNA_MU_PRE_NS_LEN", MU_PRE_NS_LEN);
     emit_usize(&mut h, "ANDNA_MU_PRE_CTX_HASH_OFF", MU_PRE_CTX_HASH_OFF);
     emit_usize(&mut h, "ANDNA_MU_PRE_CTX_HASH_LEN", MU_PRE_CTX_HASH_LEN);
-    emit_usize(&mut h, "ANDNA_MU_PRE_POLICY_HASH_OFF", MU_PRE_POLICY_HASH_OFF);
-    emit_usize(&mut h, "ANDNA_MU_PRE_POLICY_HASH_LEN", MU_PRE_POLICY_HASH_LEN);
+    emit_usize(
+        &mut h,
+        "ANDNA_MU_PRE_POLICY_HASH_OFF",
+        MU_PRE_POLICY_HASH_OFF,
+    );
+    emit_usize(
+        &mut h,
+        "ANDNA_MU_PRE_POLICY_HASH_LEN",
+        MU_PRE_POLICY_HASH_LEN,
+    );
     h.push('\n');
 
     // ── T_E ──
@@ -179,15 +197,40 @@ fn generate_header() -> String {
 
     // ── mu_pre offset-chain contiguity ──
     h.push_str("/* ── mu_pre Offset-Chain Contiguity Guards ── */\n");
-    offset_chain(&mut h, "MU_PRE_PK_HASH", "MU_PRE_DOMAIN_SEP", "MU_PRE_PK_HASH");
-    offset_chain(&mut h, "MU_PRE_DOMAIN_SEP", "MU_PRE_VERSION", "MU_PRE_DOMAIN_SEP");
-    offset_chain(&mut h, "MU_PRE_VERSION", "MU_PRE_DEVICE_ID32", "MU_PRE_VERSION");
-    offset_chain(&mut h, "MU_PRE_DEVICE_ID32", "MU_PRE_EPOCH", "MU_PRE_DEVICE_ID32");
+    offset_chain(
+        &mut h,
+        "MU_PRE_PK_HASH",
+        "MU_PRE_DOMAIN_SEP",
+        "MU_PRE_PK_HASH",
+    );
+    offset_chain(
+        &mut h,
+        "MU_PRE_DOMAIN_SEP",
+        "MU_PRE_VERSION",
+        "MU_PRE_DOMAIN_SEP",
+    );
+    offset_chain(
+        &mut h,
+        "MU_PRE_VERSION",
+        "MU_PRE_DEVICE_ID32",
+        "MU_PRE_VERSION",
+    );
+    offset_chain(
+        &mut h,
+        "MU_PRE_DEVICE_ID32",
+        "MU_PRE_EPOCH",
+        "MU_PRE_DEVICE_ID32",
+    );
     offset_chain(&mut h, "MU_PRE_EPOCH", "MU_PRE_SID", "MU_PRE_EPOCH");
     offset_chain(&mut h, "MU_PRE_SID", "MU_PRE_ND", "MU_PRE_SID");
     offset_chain(&mut h, "MU_PRE_ND", "MU_PRE_NS", "MU_PRE_ND");
     offset_chain(&mut h, "MU_PRE_NS", "MU_PRE_CTX_HASH", "MU_PRE_NS");
-    offset_chain(&mut h, "MU_PRE_CTX_HASH", "MU_PRE_POLICY_HASH", "MU_PRE_CTX_HASH");
+    offset_chain(
+        &mut h,
+        "MU_PRE_CTX_HASH",
+        "MU_PRE_POLICY_HASH",
+        "MU_PRE_CTX_HASH",
+    );
     h.push_str("_Static_assert(\n");
     h.push_str("    ANDNA_MU_PRE_POLICY_HASH_OFF + ANDNA_MU_PRE_POLICY_HASH_LEN\n");
     h.push_str("    == ANDNA_MU_PRE_LEN,\n");

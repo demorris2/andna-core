@@ -9,9 +9,9 @@
 //! - Return enum only; no panics cross the boundary (catch_unwind)
 //! - Generated header: include/andna_core.h (via cbindgen)
 
+use andna_audit::{global_sink, init_sink_if_needed, VerifyEventInput};
 use andna_contracts::*;
 use andna_core::VerifyError;
-use andna_audit::{global_sink, init_sink_if_needed, VerifyEventInput};
 use std::panic;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn andna_gen_test_frame(out_ptr: *mut u8, out_len: usize) 
 
         #[cfg(feature = "oqs-backend")]
         {
-            use sha3::digest::{Update, XofReader, ExtendableOutput};
+            use sha3::digest::{ExtendableOutput, Update, XofReader};
             use sha3::Shake256;
 
             // ── keygen ──────────────────────────────────────────────
@@ -441,14 +441,8 @@ mod tests {
         let te = [0u8; TE_LEN];
         let sig = [0u8; SIG_LEN];
         unsafe {
-            let r = andna_verify_vnext(
-                mu.as_ptr(),
-                100,
-                te.as_ptr(),
-                TE_LEN,
-                sig.as_ptr(),
-                SIG_LEN,
-            );
+            let r =
+                andna_verify_vnext(mu.as_ptr(), 100, te.as_ptr(), TE_LEN, sig.as_ptr(), SIG_LEN);
             assert_eq!(r, AndnaErr::Length);
         }
     }
@@ -529,6 +523,11 @@ mod tests {
         assert_eq!(rc, AndnaErr::Ok, "gen_test_frame failed with code {:?}", rc);
 
         let vrc = unsafe { andna_verify_frame_v2(buf.as_ptr(), buf.len()) };
-        assert_eq!(vrc, AndnaErr::Ok, "verify rejected gen'd frame with code {:?}", vrc);
+        assert_eq!(
+            vrc,
+            AndnaErr::Ok,
+            "verify rejected gen'd frame with code {:?}",
+            vrc
+        );
     }
 }

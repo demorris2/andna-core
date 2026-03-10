@@ -96,8 +96,8 @@ pub const TE_EPOCH_LEN: usize = 8;
 pub const TE_DEVICE_ID16_OFF: usize = 1320;
 pub const TE_DEVICE_ID16_LEN: usize = 16;
 
-pub const TE_V1_LEN: usize = 1336;  // Phase 1, ACTIVE
-pub const TE_V2_LEN: usize = 1352;  // Phase 2+, defined NOT enabled
+pub const TE_V1_LEN: usize = 1336; // Phase 1, ACTIVE
+pub const TE_V2_LEN: usize = 1352; // Phase 2+, defined NOT enabled
 pub const TE_LEN: usize = TE_V1_LEN;
 
 // ── Signature (2420 bytes) ─────────────────────────────────────────────────
@@ -130,10 +130,19 @@ pub const TE_CACHE_NEG_TTL_S: u64 = 45;
 
 // ── Compile-Time Assertions ────────────────────────────────────────────────
 
-const _: () = assert!(MU_PRE_PK_HASH_LEN + MU_PRE_DOMAIN_SEP_LEN + MU_PRE_VERSION_LEN
-    + MU_PRE_DEVICE_ID32_LEN + MU_PRE_EPOCH_LEN + MU_PRE_SID_LEN
-    + MU_PRE_ND_LEN + MU_PRE_NS_LEN + MU_PRE_CTX_HASH_LEN
-    + MU_PRE_POLICY_HASH_LEN == MU_PRE_LEN);
+const _: () = assert!(
+    MU_PRE_PK_HASH_LEN
+        + MU_PRE_DOMAIN_SEP_LEN
+        + MU_PRE_VERSION_LEN
+        + MU_PRE_DEVICE_ID32_LEN
+        + MU_PRE_EPOCH_LEN
+        + MU_PRE_SID_LEN
+        + MU_PRE_ND_LEN
+        + MU_PRE_NS_LEN
+        + MU_PRE_CTX_HASH_LEN
+        + MU_PRE_POLICY_HASH_LEN
+        == MU_PRE_LEN
+);
 const _: () = assert!(TE_RHO_LEN + TE_T1_LEN + TE_EPOCH_LEN + TE_DEVICE_ID16_LEN == TE_V1_LEN);
 const _: () = assert!(TE_V1_LEN == 1336);
 const _: () = assert!(TE_V2_LEN == 1352);
@@ -158,10 +167,21 @@ const _: () = assert!(MLDSA44_GAMMA2 == 95232);
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn mu_pre_total() { assert_eq!(MU_PRE_LEN, 274); }
-    #[test] fn te_lengths() { assert_eq!(TE_V1_LEN, 1336); assert_eq!(TE_LEN, TE_V1_LEN); }
-    #[test] fn frame_v2() { assert_eq!(FRAME_V2_LEN, 4030); }
-    #[test] fn hex_offsets() {
+    #[test]
+    fn mu_pre_total() {
+        assert_eq!(MU_PRE_LEN, 274);
+    }
+    #[test]
+    fn te_lengths() {
+        assert_eq!(TE_V1_LEN, 1336);
+        assert_eq!(TE_LEN, TE_V1_LEN);
+    }
+    #[test]
+    fn frame_v2() {
+        assert_eq!(FRAME_V2_LEN, 4030);
+    }
+    #[test]
+    fn hex_offsets() {
         assert_eq!(MU_PRE_PK_HASH_OFF, 0x0000);
         assert_eq!(MU_PRE_DOMAIN_SEP_OFF, 0x0040);
         assert_eq!(MU_PRE_VERSION_OFF, 0x0049);
