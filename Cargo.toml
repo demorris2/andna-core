@@ -18,6 +18,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Proprietary"
 authors = ["Darrell Morris Jr."]
+publish = false
 
 [workspace.dependencies]
 # Internal crates
