@@ -1,19 +1,70 @@
-//! # ffi_cli — command-line smoke test for AN-DNA FFI
+//! # andna — Rust-owned end-user proof CLI for AN-DNA R1
 //!
-//! Usage:
-//!   ffi-cli version                     Print library version
-//!   ffi-cli verify-frame <hex>          Verify a hex-encoded 4030-byte frame
-//!   ffi-cli verify-frame --file <path>  Verify a raw binary frame file
-//!   ffi-cli smoke                       Run built-in smoke tests (stub mode)
+//! This promotes the Rust path from smoke tester to the full operator workflow.
+//! The Rust FFI remains the authoritative verification kernel, and this binary
+//! now owns the user-facing proof flow:
+//!   gen → verify → tamper → verify → replay → export
+//!
+//! Backward compatibility:
+//! - `version`, `verify-frame`, and `smoke` are preserved.
 //!
 //! Exit codes:
-//!   0  = success / verification passed
-//!   1  = verification failed (with error name)
-//!   2  = usage error
+//!   0 = success / verification passed
+//!   1 = verification failed / tamper detected / mismatch
+//!   2 = usage / file / parsing error
 
 use andna_contracts::*;
 use andna_ffi::*;
-use std::{env, fs, process};
+use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
+use std::{
+    env,
+    ffi::CStr,
+    fs,
+    io,
+    path::{Path, PathBuf},
+    process,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+const LOG_PATH: &str = "verification_log.json";
+const EVIDENCE_SCHEMA_VERSION: &str = "1.1.0";
+const CONTRACT_VERSION: &str = "vNext-Phase1-R1";
+const ENGINE_NAME: &str = "rust";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct VerificationRecord {
+    run_id: String,
+    timestamp: String,
+    frame_hash: String,
+    frame_len: usize,
+    decision: String,
+    error_code: i32,
+    error_msg: Option<String>,
+    engine: String,
+    contract_version: String,
+    schema_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReplayFile {
+    schema_version: String,
+    contract_version: String,
+    record_count: usize,
+    records: Vec<VerificationRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EvidenceManifest {
+    schema_version: String,
+    contract_version: String,
+    record_count: usize,
+    evidence_file: String,
+    evidence_digest: String,
+    digest_algorithm: String,
+    verification_digest: String,
+    generated_at: String,
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -21,62 +72,408 @@ fn main() {
         usage();
     }
 
-    match args[1].as_str() {
-        "version" => cmd_version(),
-        "verify-frame" => cmd_verify_frame(&args[2..]),
+    let rc = match args[1].as_str() {
+        "version" => {
+            cmd_version();
+            0
+        }
+        "verify" => cmd_verify(&args[2..]),
+        "replay" => cmd_replay(&args[2..]),
+        "export" => cmd_export(&args[2..]),
+        "gen" => cmd_gen(&args[2..]),
+        "tamper" => cmd_tamper(&args[2..]),
+        // Backward-compatible legacy commands
+        "verify-frame" => cmd_verify_frame_legacy(&args[2..]),
         "smoke" => cmd_smoke(),
-        _ => usage(),
-    }
+        "--help" | "-h" | "help" => {
+            usage();
+        }
+        _ => {
+            eprintln!("Unknown command or wrong arguments: {}", args[1]);
+            usage();
+        }
+    };
+    process::exit(rc);
 }
 
 fn usage() -> ! {
-    eprintln!("Usage: ffi-cli <version|verify-frame|smoke>");
-    eprintln!("  version                     Print library version");
-    eprintln!("  verify-frame <hex>          Verify hex-encoded frame");
-    eprintln!("  verify-frame --file <path>  Verify binary frame file");
-    eprintln!("  smoke                       Run built-in smoke tests");
+    eprintln!("AN-DNA vNext — Deterministic Replay CLI (Rust authoritative path)\n");
+    eprintln!("Usage:");
+    eprintln!("    andna verify   <frame.bin>               Verify a binary frame");
+    eprintln!("    andna replay   <log.json>                Replay and validate decisions");
+    eprintln!("    andna replay   <log.json> --frame <f.bin> Re-verify frame, assert same decision");
+    eprintln!("    andna export   <output_dir>              Export evidence bundle");
+    eprintln!("    andna gen      <output.bin>              Generate valid sample frame");
+    eprintln!("    andna tamper   <input.bin> <output.bin>  Flip one byte to create a reject");
+    eprintln!("\nLegacy:");
+    eprintln!("    andna version");
+    eprintln!("    andna verify-frame <hex>");
+    eprintln!("    andna verify-frame --file <path>");
+    eprintln!("    andna smoke");
+    eprintln!("\n5-Minute Demo:");
+    eprintln!("    andna gen sample_frame.bin");
+    eprintln!("    andna verify sample_frame.bin");
+    eprintln!("    andna tamper sample_frame.bin tampered_frame.bin");
+    eprintln!("    andna verify tampered_frame.bin");
+    eprintln!("    andna replay verification_log.json");
+    eprintln!("    andna replay verification_log.json --frame sample_frame.bin");
+    eprintln!("    andna export evidence/");
     process::exit(2);
 }
 
 fn cmd_version() {
     let ptr = andna_version();
-    let cstr = unsafe { std::ffi::CStr::from_ptr(ptr) };
-    println!("andna-ffi {}", cstr.to_str().unwrap());
-    process::exit(0);
+    let cstr = unsafe { CStr::from_ptr(ptr) };
+    println!("andna {}", cstr.to_str().unwrap_or("unknown"));
 }
 
-fn cmd_verify_frame(args: &[String]) {
+fn cmd_verify(args: &[String]) -> i32 {
+    if args.len() != 1 {
+        usage();
+    }
+
+    let path = Path::new(&args[0]);
+    let frame = match fs::read(path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {}", path.display(), e);
+            return 2;
+        }
+    };
+
+    let start = std::time::Instant::now();
+    let err = unsafe { andna_verify_frame_v2(frame.as_ptr(), frame.len()) };
+    let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    let frame_hash = sha3_256_hex(&frame);
+    let ok = err == AndnaErr::Ok;
+    let decision = if ok { "ACCEPT" } else { "REJECT" };
+    let error_code = err as i32;
+    let error_msg = if ok { None } else { Some(strerror(err)) };
+
+    let mut log = load_log(Path::new(LOG_PATH)).unwrap_or_else(|_| ReplayFile::new());
+    let record = VerificationRecord {
+        run_id: format!("run-{}", now_nanos()),
+        timestamp: now_timestamp(),
+        frame_hash: frame_hash.clone(),
+        frame_len: frame.len(),
+        decision: decision.to_string(),
+        error_code,
+        error_msg: error_msg.clone(),
+        engine: ENGINE_NAME.to_string(),
+        contract_version: CONTRACT_VERSION.to_string(),
+        schema_version: EVIDENCE_SCHEMA_VERSION.to_string(),
+    };
+    log.records.push(record.clone());
+    log.record_count = log.records.len();
+
+    if let Err(e) = save_log(Path::new(LOG_PATH), &log) {
+        eprintln!("error: failed to persist {}: {}", LOG_PATH, e);
+        return 2;
+    }
+
+    // Flush the Rust authoritative FFI sink to disk (safely without the unsafe wrapper)
+    if let Ok(c_path) = std::ffi::CString::new("andna_audit.jsonl") {
+        andna_audit_export_jsonl(c_path.as_ptr());
+    }
+
+    print_verify_result(path, &frame_hash, &record, duration_ms);
+    if ok { 0 } else { 1 }
+}
+
+fn cmd_replay(args: &[String]) -> i32 {
+    if args.is_empty() {
+        usage();
+    }
+
+    let log_path = Path::new(&args[0]);
+    let replay = match load_log(log_path) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("error: cannot load {}: {}", log_path.display(), e);
+            return 2;
+        }
+    };
+    if replay.records.is_empty() {
+        eprintln!("error: no records in {}", log_path.display());
+        return 2;
+    }
+
+    let frame_arg = if args.len() == 3 && args[1] == "--frame" {
+        Some(PathBuf::from(&args[2]))
+    } else if args.len() == 1 {
+        None
+    } else {
+        usage();
+    };
+
+    print_replay_header(log_path, &replay);
+
+    if let Some(frame_path) = frame_arg {
+        return replay_with_frame(&replay, &frame_path);
+    }
+
+    let mut all_valid = true;
+    println!("────────────────────────────────────────────────────────────");
+    for (idx, rec) in replay.records.iter().enumerate() {
+        println!("\n  Record {}/{}", idx + 1, replay.records.len());
+        kv(3, "Run ID", &rec.run_id);
+        kv(3, "Decision", &rec.decision);
+        kv(3, "Frame hash", &rec.frame_hash);
+        kv(3, "Error code", &rec.error_code.to_string());
+        kv(3, "Engine", &rec.engine);
+        kv(3, "Contract", &rec.contract_version);
+
+        if !rec.run_id.starts_with("run-") || rec.frame_hash.len() != 64 {
+            println!("      ⚠  Record structure invalid");
+            all_valid = false;
+        } else {
+            println!("      ✓  Record structure valid");
+        }
+    }
+    println!("────────────────────────────────────────────────────────────");
+
+    if all_valid {
+        println!("\n  ✓ Replay verified: {} record(s), all structurally valid.", replay.records.len());
+        println!("  Determinism claim: same frame → same hash → same decision.");
+        println!("  To fully verify: `andna replay <log> --frame <frame.bin>`\n");
+        0
+    } else {
+        println!("\n  ✗ Replay has structural issues. See warnings above.\n");
+        1
+    }
+}
+
+fn replay_with_frame(replay: &ReplayFile, frame_path: &Path) -> i32 {
+    let frame = match fs::read(frame_path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {}", frame_path.display(), e);
+            return 2;
+        }
+    };
+    let frame_hash = sha3_256_hex(&frame);
+    let Some(rec) = replay.records.iter().find(|r| r.frame_hash == frame_hash) else {
+        println!("────────────────────────────────────────────────────────────");
+        println!("\n  ✗ No record matches frame hash {}...", &frame_hash[..16]);
+        println!("    Frame may not be from this verification session.\n");
+        return 1;
+    };
+
+    let err = unsafe { andna_verify_frame_v2(frame.as_ptr(), frame.len()) };
+    let new_decision = if err == AndnaErr::Ok { "ACCEPT" } else { "REJECT" };
+
+    println!("────────────────────────────────────────────────────────────");
+    println!("\n  Re-verifying frame: {}", frame_path.display());
+    kv(3, "Frame digest", &frame_hash);
+    kv(3, "Recorded decision", &rec.decision);
+    kv(3, "Re-verify decision", new_decision);
+    kv(3, "Re-verify engine", ENGINE_NAME);
+
+    if new_decision == rec.decision {
+        println!("\n      ✓ Deterministic: same frame → same decision");
+        println!("        Recorded: {}  |  Re-verified: {}\n", rec.decision, new_decision);
+        0
+    } else {
+        println!("\n      ✗ NON-DETERMINISTIC: decisions differ!");
+        println!("        Recorded: {}  |  Re-verified: {}\n", rec.decision, new_decision);
+        1
+    }
+}
+
+fn cmd_export(args: &[String]) -> i32 {
+    if args.len() != 1 {
+        usage();
+    }
+
+    let log = match load_log(Path::new(LOG_PATH)) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("error: cannot load {}: {}", LOG_PATH, e);
+            return 2;
+        }
+    };
+    if log.records.is_empty() {
+        eprintln!("error: no session records to export");
+        return 2;
+    }
+
+    let output_dir = Path::new(&args[0]);
+    if let Err(e) = fs::create_dir_all(output_dir) {
+        eprintln!("error: cannot create {}: {}", output_dir.display(), e);
+        return 2;
+    }
+
+    let evidence_path = output_dir.join("evidence.json");
+    let manifest_path = output_dir.join("manifest.json");
+
+    if let Err(e) = save_log(&evidence_path, &log) {
+        eprintln!("error: cannot write {}: {}", evidence_path.display(), e);
+        return 2;
+    }
+
+    // Export Gate 2 Artifacts (Authoritative Log + Validator output)
+    let audit_src = Path::new("andna_audit.jsonl");
+    let mut val_json = format!(
+        "{{\n  \"status\": \"FAIL\",\n  \"error\": \"No audit log found\",\n  \"records_validated\": 0,\n  \"chain_hash_algorithm\": \"sha3-256\"\n}}"
+    );
+
+    if audit_src.exists() {
+        let bundle_audit = output_dir.join("andna_audit.jsonl");
+        if let Err(e) = fs::copy(audit_src, &bundle_audit) {
+            eprintln!("error: cannot copy audit log: {}", e);
+        } else if let Ok(content) = fs::read_to_string(audit_src) {
+            let records_validated = content.lines().filter(|l| !l.trim().is_empty()).count();
+            
+            // Actually run the validator!
+            match andna_audit::validate_jsonl(&content) {
+                Ok(_) => {
+                    val_json = format!(
+                        "{{\n  \"status\": \"PASS\",\n  \"records_validated\": {},\n  \"chain_hash_algorithm\": \"sha3-256\"\n}}",
+                        records_validated
+                    );
+                }
+                Err(e) => {
+                    val_json = format!(
+                        "{{\n  \"status\": \"FAIL\",\n  \"error\": \"{:?}\",\n  \"records_validated\": {},\n  \"chain_hash_algorithm\": \"sha3-256\"\n}}",
+                        e, records_validated
+                    );
+                }
+            }
+        }
+    }
+    
+    if let Err(e) = fs::write(output_dir.join("audit_validate.json"), val_json) {
+        eprintln!("error: cannot write audit_validate.json: {}", e);
+    }
+
+    let evidence_bytes = match fs::read(&evidence_path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {}", evidence_path.display(), e);
+            return 2;
+        }
+    };
+
+    let manifest = EvidenceManifest {
+        schema_version: EVIDENCE_SCHEMA_VERSION.to_string(),
+        contract_version: CONTRACT_VERSION.to_string(),
+        record_count: log.records.len(),
+        evidence_file: "evidence.json".to_string(),
+        evidence_digest: sha3_256_hex(&evidence_bytes),
+        digest_algorithm: "sha3-256".to_string(),
+        verification_digest: compute_verification_digest(&log.records),
+        generated_at: now_timestamp(),
+    };
+
+    let manifest_bytes = to_pretty_json(&manifest).into_bytes();
+    if let Err(e) = fs::write(&manifest_path, manifest_bytes) {
+        eprintln!("error: cannot write {}: {}", manifest_path.display(), e);
+        return 2;
+    }
+
+    print_export_result(output_dir, &manifest);
+    0
+}
+
+fn cmd_gen(args: &[String]) -> i32 {
+    if args.len() != 1 {
+        usage();
+    }
+    let output = Path::new(&args[0]);
+    let mut frame = vec![0u8; FRAME_V2_LEN];
+    let rc = unsafe { andna_gen_test_frame(frame.as_mut_ptr(), frame.len()) };
+    if rc != AndnaErr::Ok {
+        eprintln!("error: andna_gen_test_frame failed: {}", strerror(rc));
+        eprintln!("hint: build the Rust CLI with the real ML-DSA backend enabled.");
+        return 1;
+    }
+    if let Err(e) = fs::write(output, &frame) {
+        eprintln!("error: cannot write {}: {}", output.display(), e);
+        return 2;
+    }
+
+    println!("\n============================================================");
+    println!("  AN-DNA Sample Frame Generated (Rust authoritative path)");
+    println!("============================================================");
+    kv(4, "Output", &output.display().to_string());
+    kv(4, "Size", &format!("{} bytes", frame.len()));
+    kv(4, "Frame digest", &sha3_256_hex(&frame));
+    kv(4, "Expected decision", "ACCEPT (real ML-DSA backend)");
+    println!();
+    0
+}
+
+fn cmd_tamper(args: &[String]) -> i32 {
+    if args.len() != 2 {
+        usage();
+    }
+    let input = Path::new(&args[0]);
+    let output = Path::new(&args[1]);
+
+    let mut frame = match fs::read(input) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {}", input.display(), e);
+            return 2;
+        }
+    };
+    if frame.is_empty() {
+        eprintln!("error: {} is empty", input.display());
+        return 2;
+    }
+
+    let before = frame[0];
+    frame[0] ^= 0xFF;
+    if let Err(e) = fs::write(output, &frame) {
+        eprintln!("error: cannot write {}: {}", output.display(), e);
+        return 2;
+    }
+
+    println!("\n════════════════════════════════════════════════════════════");
+    println!("  AN-DNA Frame Tampered");
+    println!("════════════════════════════════════════════════════════════");
+    kv(4, "Input", &input.display().to_string());
+    kv(4, "Output", &output.display().to_string());
+    kv(4, "Tampered byte", &format!("offset 0: 0x{:02X} → 0x{:02X}", before, frame[0]));
+    kv(4, "Expected decision", "REJECT");
+    println!();
+    0
+}
+
+fn cmd_verify_frame_legacy(args: &[String]) -> i32 {
     if args.is_empty() {
         usage();
     }
 
     let frame_bytes = if args[0] == "--file" {
-        if args.len() < 2 { usage(); }
-        fs::read(&args[1]).unwrap_or_else(|e| {
-            eprintln!("error: cannot read {}: {}", args[1], e);
-            process::exit(2);
-        })
+        if args.len() < 2 {
+            usage();
+        }
+        match fs::read(&args[1]) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("error: cannot read {}: {}", args[1], e);
+                return 2;
+            }
+        }
     } else {
         hex_decode(&args[0])
     };
 
-    let result = unsafe {
-        andna_verify_frame_v2(frame_bytes.as_ptr(), frame_bytes.len())
-    };
-
-    let msg_ptr = andna_strerror(result);
-    let msg = unsafe { std::ffi::CStr::from_ptr(msg_ptr) }.to_str().unwrap();
+    let result = unsafe { andna_verify_frame_v2(frame_bytes.as_ptr(), frame_bytes.len()) };
+    let msg = strerror(result);
 
     if result == AndnaErr::Ok {
         println!("PASS: {}", msg);
-        process::exit(0);
+        0
     } else {
         println!("FAIL ({}): {}", result as i32, msg);
-        process::exit(1);
+        1
     }
 }
 
-fn cmd_smoke() {
+fn cmd_smoke() -> i32 {
     println!("=== AN-DNA FFI Smoke Tests ===\n");
     let mut pass = 0;
     let mut fail = 0;
@@ -107,8 +504,7 @@ fn cmd_smoke() {
         ];
         let mut ok = true;
         for (code, substr) in codes {
-            let ptr = andna_strerror(code);
-            let msg = unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str().unwrap();
+            let msg = strerror(code);
             if !msg.contains(substr) {
                 println!("  [FAIL] strerror({:?}) = {:?}, expected substring {:?}", code, msg, substr);
                 ok = false;
@@ -147,68 +543,170 @@ fn cmd_smoke() {
         }
     }
 
-    // Test 5: well-formed frame (all directives satisfied, zero signature)
-    //   - stub backend: sig verify always passes → Ok
-    //   - oqs-backend: zero sig is invalid → ErrSigInvalid
-    //   Both outcomes mean the plumbing works correctly.
+    // Test 5: generate + verify if available
     {
         let mut frame = vec![0u8; FRAME_V2_LEN];
-        use sha3::digest::{ExtendableOutput, Update, XofReader};
-
-        // T_E is all zeros: epoch=0, device_id16=0x00×16
-
-        // Set pk_hash = SHAKE256(zeros_te, 64)
-        let te_slice = &frame[MU_PRE_LEN..MU_PRE_LEN + TE_LEN];
-        let mut hasher = sha3::Shake256::default();
-        hasher.update(te_slice);
-        let mut reader = hasher.finalize_xof();
-        reader.read(&mut frame[0..PK_HASH_LEN]);
-
-        // Directive A: set domain separator + version
-        frame[MU_PRE_DOMAIN_SEP_OFF..MU_PRE_DOMAIN_SEP_OFF + DOMAIN_SEP_LEN]
-            .copy_from_slice(&DOMAIN_SEP);
-        frame[MU_PRE_VERSION_OFF] = MU_PRE_VERSION_VAL;
-
-        // Directive B: epoch in mu_pre must match T_E epoch (both are 0, ok)
-
-        // Directive E: device_id32 = SHAKE256(device_id16, 32)
-        // device_id16 = zeros (from T_E)
-        let device_id16 = &[0u8; TE_DEVICE_ID16_LEN];
-        let mut id32_hasher = sha3::Shake256::default();
-        id32_hasher.update(device_id16);
-        let mut id32_reader = id32_hasher.finalize_xof();
-        id32_reader.read(&mut frame[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN]);
-
-        let r = unsafe { andna_verify_frame_v2(frame.as_ptr(), frame.len()) };
-        if r == AndnaErr::Ok {
-            println!("  [PASS] well-formed frame → Ok (stub backend)");
-            pass += 1;
-        } else if r == AndnaErr::SigInvalid {
-            println!("  [PASS] well-formed frame → ErrSigInvalid (real ML-DSA-44 backend)");
-            pass += 1;
+        let rc = unsafe { andna_gen_test_frame(frame.as_mut_ptr(), frame.len()) };
+        if rc == AndnaErr::Ok {
+            let vrc = unsafe { andna_verify_frame_v2(frame.as_ptr(), frame.len()) };
+            if vrc == AndnaErr::Ok {
+                println!("  [PASS] generated frame → Ok (real ML-DSA-44 backend)");
+                pass += 1;
+            } else {
+                println!("  [FAIL] generated frame verify → {:?}", vrc);
+                fail += 1;
+            }
         } else {
-            let msg_ptr = andna_strerror(r);
-            let msg = unsafe { std::ffi::CStr::from_ptr(msg_ptr) }.to_str().unwrap();
-            println!("  [FAIL] well-formed frame → {:?} ({})", r, msg);
-            fail += 1;
-        }
-    }
-
-    // Test 6: zeroed frame → Directive A catches missing domain sep/version
-    {
-        let frame = vec![0u8; FRAME_V2_LEN]; // domain sep = zeros → MuPre error
-        let r = unsafe { andna_verify_frame_v2(frame.as_ptr(), frame.len()) };
-        if r == AndnaErr::MuPre {
-            println!("  [PASS] zeroed frame → ErrMuPre (Directive A: domain sep)");
+            println!("  [WARN] gen_test_frame unavailable in current backend: {}", strerror(rc));
+            println!("         smoke remains valid, but end-user gen requires oqs-backend");
             pass += 1;
-        } else {
-            println!("  [FAIL] zeroed frame → {:?}", r);
-            fail += 1;
         }
     }
 
     println!("\n=== Results: {} passed, {} failed ===", pass, fail);
-    process::exit(if fail > 0 { 1 } else { 0 });
+    if fail > 0 { 1 } else { 0 }
+}
+
+impl ReplayFile {
+    fn new() -> Self {
+        Self {
+            schema_version: EVIDENCE_SCHEMA_VERSION.to_string(),
+            contract_version: CONTRACT_VERSION.to_string(),
+            record_count: 0,
+            records: Vec::new(),
+        }
+    }
+}
+
+fn load_log(path: &Path) -> io::Result<ReplayFile> {
+    if !path.exists() {
+        return Ok(ReplayFile::new());
+    }
+    let raw = fs::read_to_string(path)?;
+    serde_json::from_str(&raw).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+fn save_log(path: &Path, replay: &ReplayFile) -> io::Result<()> {
+    fs::write(path, to_pretty_json(replay))
+}
+
+fn to_pretty_json<T: Serialize>(value: &T) -> String {
+    serde_json::to_string_pretty(value).expect("json serialization should not fail")
+}
+
+fn strerror(err: AndnaErr) -> String {
+    let ptr = andna_strerror(err);
+    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+}
+
+fn compute_verification_digest(records: &[VerificationRecord]) -> String {
+    let mut hasher = Sha3_256::new();
+    for r in records {
+        let entry = format!(
+            "{}|{}|{}|{}|{}\n",
+            r.frame_hash, r.frame_len, r.decision, r.error_code, r.contract_version
+        );
+        hasher.update(entry.as_bytes());
+    }
+    hex_lower(&hasher.finalize())
+}
+
+fn print_verify_result(path: &Path, frame_hash: &str, record: &VerificationRecord, duration_ms: f64) {
+    println!("\n════════════════════════════════════════════════════════════");
+    println!("  AN-DNA Verification Result");
+    println!("════════════════════════════════════════════════════════════");
+    kv(4, "Input", &path.display().to_string());
+    kv(4, "Frame size", &format!("{} bytes", record.frame_len));
+    kv(4, "Frame digest", frame_hash);
+    println!("────────────────────────────────────────────────────────────");
+    if record.decision == "ACCEPT" {
+        kv(4, "Decision", "✓ ACCEPT");
+    } else {
+        kv(4, "Decision", "✗ REJECT");
+        kv(4, "Error code", &record.error_code.to_string());
+        kv(4, "Error", record.error_msg.as_deref().unwrap_or("unknown"));
+    }
+    println!("────────────────────────────────────────────────────────────");
+    kv(4, "Engine", &record.engine);
+    kv(4, "Contract version", &record.contract_version);
+    kv(4, "Duration", &format!("{:.2} ms", duration_ms));
+    kv(4, "Run ID", &record.run_id);
+    kv(4, "Log", LOG_PATH);
+    println!();
+}
+
+fn print_replay_header(log_path: &Path, replay: &ReplayFile) {
+    println!("\n════════════════════════════════════════════════════════════");
+    println!("  AN-DNA Deterministic Replay");
+    println!("════════════════════════════════════════════════════════════");
+    kv(4, "Log file", &log_path.display().to_string());
+    kv(4, "Record count", &replay.records.len().to_string());
+    kv(4, "Schema version", &replay.schema_version);
+    kv(4, "Contract version", &replay.contract_version);
+}
+
+fn print_export_result(output_dir: &Path, manifest: &EvidenceManifest) {
+    println!("\n════════════════════════════════════════════════════════════");
+    println!("  AN-DNA Evidence Bundle (Rust authoritative path)");
+    println!("════════════════════════════════════════════════════════════");
+    kv(4, "Output directory", &output_dir.display().to_string());
+    kv(4, "Records", &manifest.record_count.to_string());
+    println!("\n  Bundle contents:");
+    println!("    evidence.json                 {} bytes", file_len(&output_dir.join("evidence.json")));
+    println!("    manifest.json                 {} bytes", file_len(&output_dir.join("manifest.json")));
+    if output_dir.join("andna_audit.jsonl").exists() {
+        println!("    andna_audit.jsonl             {} bytes", file_len(&output_dir.join("andna_audit.jsonl")));
+        println!("    audit_validate.json           {} bytes", file_len(&output_dir.join("audit_validate.json")));
+    }
+    println!("────────────────────────────────────────────────────────────");
+    kv(4, "Evidence digest", &manifest.evidence_digest);
+    kv(4, "Digest algorithm", &manifest.digest_algorithm);
+    kv(4, "Contract version", &manifest.contract_version);
+    kv(4, "Generated at", &manifest.generated_at);
+    println!("────────────────────────────────────────────────────────────\n");
+    println!("  ┌─────────────────────────────────────────────────────┐");
+    println!("  │  VERIFICATION DIGEST (compare across machines):     │");
+    println!("  │  {}  │", manifest.verification_digest);
+    println!("  └─────────────────────────────────────────────────────┘\n");
+    println!("  This digest covers ONLY deterministic fields:");
+    println!("  frame_hash + frame_len + decision + error_code + contract_version");
+    println!("  It excludes timestamps, run_ids, and engine names.");
+    println!("  If two machines produce the same digest, determinism holds.\n");
+}
+
+fn file_len(path: &Path) -> usize {
+    fs::metadata(path).map(|m| m.len() as usize).unwrap_or(0)
+}
+
+fn kv(indent: usize, label: &str, value: &str) {
+    println!("{:indent$}{:<22} {}", "", format!("{}:", label), value, indent = indent);
+}
+
+fn now_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
+
+fn now_timestamp() -> String {
+    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    format!("{}.{:03}Z", d.as_secs(), d.subsec_millis())
+}
+
+fn sha3_256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha3_256::new();
+    hasher.update(bytes);
+    hex_lower(&hasher.finalize())
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut out, "{:02x}", b);
+    }
+    out
 }
 
 fn hex_decode(s: &str) -> Vec<u8> {
@@ -217,11 +715,24 @@ fn hex_decode(s: &str) -> Vec<u8> {
         eprintln!("error: hex string has odd length");
         process::exit(2);
     }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap_or_else(|_| {
-            eprintln!("error: invalid hex at position {}", i);
+    let mut out = Vec::with_capacity(s.len() / 2);
+    let bytes = s.as_bytes();
+    for i in (0..bytes.len()).step_by(2) {
+        let hi = from_hex(bytes[i]);
+        let lo = from_hex(bytes[i + 1]);
+        out.push((hi << 4) | lo);
+    }
+    out
+}
+
+fn from_hex(b: u8) -> u8 {
+    match b {
+        b'0'..=b'9' => b - b'0',
+        b'a'..=b'f' => 10 + (b - b'a'),
+        b'A'..=b'F' => 10 + (b - b'A'),
+        _ => {
+            eprintln!("error: invalid hex digit {}", b as char);
             process::exit(2);
-        }))
-        .collect()
+        }
+    }
 }

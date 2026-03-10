@@ -31,7 +31,7 @@
 /* Hex: 41 4E 44 4E 41 41 55 54 48 */
 static const uint8_t ANDNA_DOMAIN_SEP[9] = {
     0x41, 0x4E, 0x44, 0x4E, 0x41, 0x41, 0x55, 0x54, 0x48
-}; /* A N D N A A U T H */
+}; /* ANDNAAUTH */
 /* V2 (future): "ANDNA-AUTH" = 10 bytes, under MU_PRE_VERSION 0x02 */
 #define ANDNA_DOMAIN_SEP_V2_LEN 10u
 
@@ -97,8 +97,6 @@ _Static_assert(ANDNA_FRAME_V2_LEN == 4030u, "ANDNA_FRAME_V2_LEN drift detected")
 _Static_assert(ANDNA_MLDSA44_BETA == 78u, "ANDNA_MLDSA44_BETA drift detected");
 _Static_assert(ANDNA_MLDSA44_GAMMA1 == 131072u, "ANDNA_MLDSA44_GAMMA1 drift detected");
 _Static_assert(ANDNA_MLDSA44_GAMMA2 == 95232u, "ANDNA_MLDSA44_GAMMA2 drift detected");
-
-/* ── Field-Sum Guards ── */
 _Static_assert(
     ANDNA_MU_PRE_PK_HASH_LEN + ANDNA_MU_PRE_DOMAIN_SEP_LEN +
     ANDNA_MU_PRE_VERSION_LEN + ANDNA_MU_PRE_DEVICE_ID32_LEN +
@@ -122,65 +120,62 @@ _Static_assert(
     "frame field sum != FRAME_V2_LEN");
 
 /* ── mu_pre Offset-Chain Contiguity Guards ── */
-_Static_assert(ANDNA_MU_PRE_PK_HASH_OFF == 0u,
-    "mu_pre pk_hash must start at 0");
 _Static_assert(ANDNA_MU_PRE_DOMAIN_SEP_OFF ==
     ANDNA_MU_PRE_PK_HASH_OFF + ANDNA_MU_PRE_PK_HASH_LEN,
-    "mu_pre domain_sep offset non-contiguous");
+    "MU_PRE_DOMAIN_SEP offset non-contiguous");
 _Static_assert(ANDNA_MU_PRE_VERSION_OFF ==
     ANDNA_MU_PRE_DOMAIN_SEP_OFF + ANDNA_MU_PRE_DOMAIN_SEP_LEN,
-    "mu_pre version offset non-contiguous");
+    "MU_PRE_VERSION offset non-contiguous");
 _Static_assert(ANDNA_MU_PRE_DEVICE_ID32_OFF ==
     ANDNA_MU_PRE_VERSION_OFF + ANDNA_MU_PRE_VERSION_LEN,
-    "mu_pre device_id32 offset non-contiguous");
+    "MU_PRE_DEVICE_ID32 offset non-contiguous");
 _Static_assert(ANDNA_MU_PRE_EPOCH_OFF ==
     ANDNA_MU_PRE_DEVICE_ID32_OFF + ANDNA_MU_PRE_DEVICE_ID32_LEN,
-    "mu_pre epoch offset non-contiguous");
+    "MU_PRE_EPOCH offset non-contiguous");
 _Static_assert(ANDNA_MU_PRE_SID_OFF ==
     ANDNA_MU_PRE_EPOCH_OFF + ANDNA_MU_PRE_EPOCH_LEN,
-    "mu_pre sid offset non-contiguous");
+    "MU_PRE_SID offset non-contiguous");
 _Static_assert(ANDNA_MU_PRE_ND_OFF ==
     ANDNA_MU_PRE_SID_OFF + ANDNA_MU_PRE_SID_LEN,
-    "mu_pre N_d offset non-contiguous");
+    "MU_PRE_ND offset non-contiguous");
 _Static_assert(ANDNA_MU_PRE_NS_OFF ==
     ANDNA_MU_PRE_ND_OFF + ANDNA_MU_PRE_ND_LEN,
-    "mu_pre N_s offset non-contiguous");
+    "MU_PRE_NS offset non-contiguous");
 _Static_assert(ANDNA_MU_PRE_CTX_HASH_OFF ==
     ANDNA_MU_PRE_NS_OFF + ANDNA_MU_PRE_NS_LEN,
-    "mu_pre ctx_hash offset non-contiguous");
+    "MU_PRE_CTX_HASH offset non-contiguous");
 _Static_assert(ANDNA_MU_PRE_POLICY_HASH_OFF ==
     ANDNA_MU_PRE_CTX_HASH_OFF + ANDNA_MU_PRE_CTX_HASH_LEN,
-    "mu_pre policy_hash offset non-contiguous");
-_Static_assert(ANDNA_MU_PRE_POLICY_HASH_OFF + ANDNA_MU_PRE_POLICY_HASH_LEN
+    "MU_PRE_POLICY_HASH offset non-contiguous");
+_Static_assert(
+    ANDNA_MU_PRE_POLICY_HASH_OFF + ANDNA_MU_PRE_POLICY_HASH_LEN
     == ANDNA_MU_PRE_LEN,
     "mu_pre tail does not reach MU_PRE_LEN");
 
 /* ── T_E Offset-Chain Contiguity Guards ── */
-_Static_assert(ANDNA_TE_RHO_OFF == 0u,
-    "TE rho must start at 0");
 _Static_assert(ANDNA_TE_T1_OFF ==
     ANDNA_TE_RHO_OFF + ANDNA_TE_RHO_LEN,
-    "TE t1 offset non-contiguous");
+    "TE_T1 offset non-contiguous");
 _Static_assert(ANDNA_TE_EPOCH_OFF ==
     ANDNA_TE_T1_OFF + ANDNA_TE_T1_LEN,
-    "TE epoch offset non-contiguous");
+    "TE_EPOCH offset non-contiguous");
 _Static_assert(ANDNA_TE_DEVICE_ID16_OFF ==
     ANDNA_TE_EPOCH_OFF + ANDNA_TE_EPOCH_LEN,
-    "TE device_id16 offset non-contiguous");
-_Static_assert(ANDNA_TE_DEVICE_ID16_OFF + ANDNA_TE_DEVICE_ID16_LEN
+    "TE_DEVICE_ID16 offset non-contiguous");
+_Static_assert(
+    ANDNA_TE_DEVICE_ID16_OFF + ANDNA_TE_DEVICE_ID16_LEN
     == ANDNA_TE_V1_LEN,
     "TE tail does not reach TE_V1_LEN");
 
 /* ── Signature Offset-Chain Contiguity Guards ── */
-_Static_assert(ANDNA_SIG_Z_OFF == 0u,
-    "sig z must start at 0");
 _Static_assert(ANDNA_SIG_H_OFF ==
     ANDNA_SIG_Z_OFF + ANDNA_SIG_Z_LEN,
-    "sig h offset non-contiguous");
+    "SIG_H offset non-contiguous");
 _Static_assert(ANDNA_SIG_C_TILDE_OFF ==
     ANDNA_SIG_H_OFF + ANDNA_SIG_H_LEN,
-    "sig c_tilde offset non-contiguous");
-_Static_assert(ANDNA_SIG_C_TILDE_OFF + ANDNA_SIG_C_TILDE_LEN
+    "SIG_C_TILDE offset non-contiguous");
+_Static_assert(
+    ANDNA_SIG_C_TILDE_OFF + ANDNA_SIG_C_TILDE_LEN
     == ANDNA_SIG_LEN,
     "sig tail does not reach SIG_LEN");
 

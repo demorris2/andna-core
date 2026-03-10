@@ -15,6 +15,7 @@ stub = ["andna-core/stub"]
 andna-contracts = { workspace = true }
 andna-core      = { workspace = true, default-features = false }
 andna-codec     = { workspace = true }
+andna-audit = { path = "../audit", features = ["oqs-backend"], default-features = false }
 oqs = "0.10"
 sha3 = "0.10"
 

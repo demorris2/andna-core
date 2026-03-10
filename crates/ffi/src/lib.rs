@@ -11,8 +11,17 @@
 
 use andna_contracts::*;
 use andna_core::VerifyError;
+use andna_audit::{global_sink, init_sink_if_needed, VerifyEventInput};
 use std::panic;
-use sha3::digest::ExtendableOutput;  // provides .finalize_xof()
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[inline]
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// C-compatible error codes.
 ///
@@ -122,6 +131,8 @@ pub unsafe extern "C" fn andna_verify_vnext(
 
 /// Verify a packed v2 frame (4030 bytes).
 ///
+/// Gate 2 v1: Rust-owned audit sink appends one record per call.
+///
 /// # Safety
 /// - `frame` must point to at least `frame_len` readable bytes
 #[no_mangle]
@@ -135,10 +146,36 @@ pub unsafe extern "C" fn andna_verify_frame_v2(frame: *const u8, frame_len: usiz
     ffi_guard(move || {
         let frame_slice = unsafe { core::slice::from_raw_parts(f, FRAME_V2_LEN) };
 
-        match andna_core::verify_frame_v2(frame_slice) {
+        // 1) Verify
+        let res = andna_core::verify_frame_v2(frame_slice);
+        let code: AndnaErr = match res {
             Ok(()) => AndnaErr::Ok,
             Err(e) => e.into(),
-        }
+        };
+
+        // 2) Gate 2: Rust-owned audit append (authoritative)
+        // Fail closed if the sink mutex is poisoned.
+        let decision: u8 = if code == AndnaErr::Ok { 1 } else { 0 };
+        let err_code: i32 = code as i32;
+
+        let sink = init_sink_if_needed(env!("CARGO_PKG_VERSION"));
+        let mut guard = match sink.lock() {
+            Ok(g) => g,
+            Err(_) => return AndnaErr::Internal,
+        };
+
+        // notes_flags are enforced inside sink (HAS_FRAME, CRYPTO_REAL, reserved bits).
+        guard.append_verify(VerifyEventInput {
+            ts_unix_ms: now_unix_ms(),
+            decision,
+            engine: 1, // rust
+            err_code,
+            notes_flags: 0,
+            frame_bytes: Some(frame_slice),
+            frame_hash: None,
+        });
+
+        code
     })
 }
 
@@ -219,12 +256,10 @@ pub unsafe extern "C" fn andna_gen_test_frame(out_ptr: *mut u8, out_len: usize) 
 
         #[cfg(feature = "oqs-backend")]
         {
-            use sha3::digest::{Update, XofReader};
+            use sha3::digest::{Update, XofReader, ExtendableOutput};
             use sha3::Shake256;
 
             // ── keygen ──────────────────────────────────────────────
-            // Prefer ML-DSA-44 if your oqs wrapper exposes it. If not, this line may
-            // need to match your existing mldsa44 backend selection.
             let scheme = match oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44) {
                 Ok(s) => s,
                 Err(_) => return AndnaErr::Internal,
@@ -318,6 +353,39 @@ pub unsafe extern "C" fn andna_gen_test_frame(out_ptr: *mut u8, out_len: usize) 
     })
 }
 
+/// Export the current Rust-owned audit log as deterministic JSONL.
+///
+/// # Safety
+/// - `path` must be a valid NUL-terminated UTF-8 string pointer.
+/// - The file will be overwritten.
+#[no_mangle]
+pub extern "C" fn andna_audit_export_jsonl(path: *const core::ffi::c_char) -> AndnaErr {
+    if path.is_null() {
+        return AndnaErr::Length;
+    }
+
+    let cstr = unsafe { core::ffi::CStr::from_ptr(path) };
+    let out_path = match cstr.to_str() {
+        Ok(s) => s,
+        Err(_) => return AndnaErr::Length,
+    };
+
+    // Snapshot under lock, then export deterministically.
+    let sink = global_sink();
+    let guard = match sink.lock() {
+        Ok(g) => g,
+        Err(_) => return AndnaErr::Internal,
+    };
+    let records = guard.snapshot();
+    drop(guard);
+
+    let jsonl = andna_audit::export_jsonl::to_jsonl(&records);
+    match std::fs::write(out_path, jsonl.as_bytes()) {
+        Ok(_) => AndnaErr::Ok,
+        Err(_) => AndnaErr::Internal,
+    }
+}
+
 /// Return a human-readable error string for the given error code.
 ///
 /// The returned pointer is a static `&str` — valid for the lifetime of the process.
@@ -373,7 +441,14 @@ mod tests {
         let te = [0u8; TE_LEN];
         let sig = [0u8; SIG_LEN];
         unsafe {
-            let r = andna_verify_vnext(mu.as_ptr(), 100, te.as_ptr(), TE_LEN, sig.as_ptr(), SIG_LEN);
+            let r = andna_verify_vnext(
+                mu.as_ptr(),
+                100,
+                te.as_ptr(),
+                TE_LEN,
+                sig.as_ptr(),
+                SIG_LEN,
+            );
             assert_eq!(r, AndnaErr::Length);
         }
     }
@@ -424,7 +499,11 @@ mod tests {
         assert!(!ptr.is_null());
         let cstr = unsafe { core::ffi::CStr::from_ptr(ptr) };
         let ver = cstr.to_str().unwrap();
-        assert!(ver.starts_with("0."), "version should start with '0.', got: {}", ver);
+        assert!(
+            ver.starts_with("0."),
+            "version should start with '0.', got: {}",
+            ver
+        );
     }
 
     #[test]
