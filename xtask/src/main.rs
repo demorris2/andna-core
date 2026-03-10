@@ -36,9 +36,12 @@ fn gen_headers() {
     println!("=== Generating andna_core.h via cbindgen ===");
     let status = Command::new("cbindgen")
         .args([
-            "--crate", "andna-ffi",
-            "--config", "cbindgen.toml",
-            "--output", "include/andna_core.h",
+            "--crate",
+            "andna-ffi",
+            "--config",
+            "cbindgen.toml",
+            "--output",
+            "include/andna_core.h",
         ])
         .status()
         .expect("cbindgen not found — install with: cargo install cbindgen");

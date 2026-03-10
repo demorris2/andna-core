@@ -20,8 +20,7 @@ use sha3::{Digest, Sha3_256};
 use std::{
     env,
     ffi::CStr,
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
     process,
     time::{SystemTime, UNIX_EPOCH},
@@ -101,7 +100,9 @@ fn usage() -> ! {
     eprintln!("Usage:");
     eprintln!("    andna verify   <frame.bin>               Verify a binary frame");
     eprintln!("    andna replay   <log.json>                Replay and validate decisions");
-    eprintln!("    andna replay   <log.json> --frame <f.bin> Re-verify frame, assert same decision");
+    eprintln!(
+        "    andna replay   <log.json> --frame <f.bin> Re-verify frame, assert same decision"
+    );
     eprintln!("    andna export   <output_dir>              Export evidence bundle");
     eprintln!("    andna gen      <output.bin>              Generate valid sample frame");
     eprintln!("    andna tamper   <input.bin> <output.bin>  Flip one byte to create a reject");
@@ -178,7 +179,11 @@ fn cmd_verify(args: &[String]) -> i32 {
     }
 
     print_verify_result(path, &frame_hash, &record, duration_ms);
-    if ok { 0 } else { 1 }
+    if ok {
+        0
+    } else {
+        1
+    }
 }
 
 fn cmd_replay(args: &[String]) -> i32 {
@@ -234,7 +239,10 @@ fn cmd_replay(args: &[String]) -> i32 {
     println!("────────────────────────────────────────────────────────────");
 
     if all_valid {
-        println!("\n  ✓ Replay verified: {} record(s), all structurally valid.", replay.records.len());
+        println!(
+            "\n  ✓ Replay verified: {} record(s), all structurally valid.",
+            replay.records.len()
+        );
         println!("  Determinism claim: same frame → same hash → same decision.");
         println!("  To fully verify: `andna replay <log> --frame <frame.bin>`\n");
         0
@@ -255,13 +263,20 @@ fn replay_with_frame(replay: &ReplayFile, frame_path: &Path) -> i32 {
     let frame_hash = sha3_256_hex(&frame);
     let Some(rec) = replay.records.iter().find(|r| r.frame_hash == frame_hash) else {
         println!("────────────────────────────────────────────────────────────");
-        println!("\n  ✗ No record matches frame hash {}...", &frame_hash[..16]);
+        println!(
+            "\n  ✗ No record matches frame hash {}...",
+            &frame_hash[..16]
+        );
         println!("    Frame may not be from this verification session.\n");
         return 1;
     };
 
     let err = unsafe { andna_verify_frame_v2(frame.as_ptr(), frame.len()) };
-    let new_decision = if err == AndnaErr::Ok { "ACCEPT" } else { "REJECT" };
+    let new_decision = if err == AndnaErr::Ok {
+        "ACCEPT"
+    } else {
+        "REJECT"
+    };
 
     println!("────────────────────────────────────────────────────────────");
     println!("\n  Re-verifying frame: {}", frame_path.display());
@@ -272,11 +287,17 @@ fn replay_with_frame(replay: &ReplayFile, frame_path: &Path) -> i32 {
 
     if new_decision == rec.decision {
         println!("\n      ✓ Deterministic: same frame → same decision");
-        println!("        Recorded: {}  |  Re-verified: {}\n", rec.decision, new_decision);
+        println!(
+            "        Recorded: {}  |  Re-verified: {}\n",
+            rec.decision, new_decision
+        );
         0
     } else {
         println!("\n      ✗ NON-DETERMINISTIC: decisions differ!");
-        println!("        Recorded: {}  |  Re-verified: {}\n", rec.decision, new_decision);
+        println!(
+            "        Recorded: {}  |  Re-verified: {}\n",
+            rec.decision, new_decision
+        );
         1
     }
 }
@@ -324,7 +345,7 @@ fn cmd_export(args: &[String]) -> i32 {
             eprintln!("error: cannot copy audit log: {}", e);
         } else if let Ok(content) = fs::read_to_string(audit_src) {
             let records_validated = content.lines().filter(|l| !l.trim().is_empty()).count();
-            
+
             // Actually run the validator!
             match andna_audit::validate_jsonl(&content) {
                 Ok(_) => {
@@ -342,7 +363,7 @@ fn cmd_export(args: &[String]) -> i32 {
             }
         }
     }
-    
+
     if let Err(e) = fs::write(output_dir.join("audit_validate.json"), val_json) {
         eprintln!("error: cannot write audit_validate.json: {}", e);
     }
@@ -435,7 +456,11 @@ fn cmd_tamper(args: &[String]) -> i32 {
     println!("════════════════════════════════════════════════════════════");
     kv(4, "Input", &input.display().to_string());
     kv(4, "Output", &output.display().to_string());
-    kv(4, "Tampered byte", &format!("offset 0: 0x{:02X} → 0x{:02X}", before, frame[0]));
+    kv(
+        4,
+        "Tampered byte",
+        &format!("offset 0: 0x{:02X} → 0x{:02X}", before, frame[0]),
+    );
     kv(4, "Expected decision", "REJECT");
     println!();
     0
@@ -506,7 +531,10 @@ fn cmd_smoke() -> i32 {
         for (code, substr) in codes {
             let msg = strerror(code);
             if !msg.contains(substr) {
-                println!("  [FAIL] strerror({:?}) = {:?}, expected substring {:?}", code, msg, substr);
+                println!(
+                    "  [FAIL] strerror({:?}) = {:?}, expected substring {:?}",
+                    code, msg, substr
+                );
                 ok = false;
             }
         }
@@ -557,14 +585,21 @@ fn cmd_smoke() -> i32 {
                 fail += 1;
             }
         } else {
-            println!("  [WARN] gen_test_frame unavailable in current backend: {}", strerror(rc));
+            println!(
+                "  [WARN] gen_test_frame unavailable in current backend: {}",
+                strerror(rc)
+            );
             println!("         smoke remains valid, but end-user gen requires oqs-backend");
             pass += 1;
         }
     }
 
     println!("\n=== Results: {} passed, {} failed ===", pass, fail);
-    if fail > 0 { 1 } else { 0 }
+    if fail > 0 {
+        1
+    } else {
+        0
+    }
 }
 
 impl ReplayFile {
@@ -596,7 +631,9 @@ fn to_pretty_json<T: Serialize>(value: &T) -> String {
 
 fn strerror(err: AndnaErr) -> String {
     let ptr = andna_strerror(err);
-    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+    unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn compute_verification_digest(records: &[VerificationRecord]) -> String {
@@ -611,7 +648,12 @@ fn compute_verification_digest(records: &[VerificationRecord]) -> String {
     hex_lower(&hasher.finalize())
 }
 
-fn print_verify_result(path: &Path, frame_hash: &str, record: &VerificationRecord, duration_ms: f64) {
+fn print_verify_result(
+    path: &Path,
+    frame_hash: &str,
+    record: &VerificationRecord,
+    duration_ms: f64,
+) {
     println!("\n════════════════════════════════════════════════════════════");
     println!("  AN-DNA Verification Result");
     println!("════════════════════════════════════════════════════════════");
@@ -652,11 +694,23 @@ fn print_export_result(output_dir: &Path, manifest: &EvidenceManifest) {
     kv(4, "Output directory", &output_dir.display().to_string());
     kv(4, "Records", &manifest.record_count.to_string());
     println!("\n  Bundle contents:");
-    println!("    evidence.json                 {} bytes", file_len(&output_dir.join("evidence.json")));
-    println!("    manifest.json                 {} bytes", file_len(&output_dir.join("manifest.json")));
+    println!(
+        "    evidence.json                 {} bytes",
+        file_len(&output_dir.join("evidence.json"))
+    );
+    println!(
+        "    manifest.json                 {} bytes",
+        file_len(&output_dir.join("manifest.json"))
+    );
     if output_dir.join("andna_audit.jsonl").exists() {
-        println!("    andna_audit.jsonl             {} bytes", file_len(&output_dir.join("andna_audit.jsonl")));
-        println!("    audit_validate.json           {} bytes", file_len(&output_dir.join("audit_validate.json")));
+        println!(
+            "    andna_audit.jsonl             {} bytes",
+            file_len(&output_dir.join("andna_audit.jsonl"))
+        );
+        println!(
+            "    audit_validate.json           {} bytes",
+            file_len(&output_dir.join("audit_validate.json"))
+        );
     }
     println!("────────────────────────────────────────────────────────────");
     kv(4, "Evidence digest", &manifest.evidence_digest);
@@ -679,7 +733,13 @@ fn file_len(path: &Path) -> usize {
 }
 
 fn kv(indent: usize, label: &str, value: &str) {
-    println!("{:indent$}{:<22} {}", "", format!("{}:", label), value, indent = indent);
+    println!(
+        "{:indent$}{:<22} {}",
+        "",
+        format!("{}:", label),
+        value,
+        indent = indent
+    );
 }
 
 fn now_nanos() -> u128 {
@@ -690,7 +750,9 @@ fn now_nanos() -> u128 {
 }
 
 fn now_timestamp() -> String {
-    let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let d = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     format!("{}.{:03}Z", d.as_secs(), d.subsec_millis())
 }
 
