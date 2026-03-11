@@ -10,11 +10,14 @@ crate-type = ["lib", "staticlib", "cdylib"]
 default = ["oqs-backend"]
 oqs-backend = ["andna-core/oqs-backend"]
 stub = ["andna-core/stub"]
+fips-integrity-stub = []
+fips-kat-vectors-embedded = []
 
 [dependencies]
 andna-contracts = { workspace = true }
 andna-core      = { workspace = true, default-features = false }
 andna-codec     = { workspace = true }
+andna-transcript = { path = "../transcript" }
 andna-audit = { path = "../audit", features = ["oqs-backend"], default-features = false }
 oqs = "0.10"
 sha3 = "0.10"

@@ -940,23 +940,7 @@ mod tests {
         assert_eq!(MODULE_STATE.load(Ordering::Relaxed), STATE_APPROVED);
     }
 
-    /// Diagnostic: call each andna_init() sub-test individually so we can see
-    /// exactly which step is failing without needing RUST_BACKTRACE.
-    /// Run with: cargo test -p andna-ffi --features "oqs-backend,fips-integrity-stub,fips-kat-vectors-embedded" -- --nocapture ffi_diagnose_init_steps
-    #[cfg(feature = "oqs-backend")]
-    #[test]
-    fn ffi_diagnose_init_steps() {
-        let shake_ok = run_shake256_kat();
-        let mldsa_ok = run_mldsa44_kat();
-        let sw_ok    = run_software_integrity_test();
-        println!("SHAKE256 KAT:          {}", if shake_ok { "PASS" } else { "FAIL" });
-        println!("ML-DSA-44 KAT:         {}", if mldsa_ok { "PASS" } else { "FAIL" });
-        println!("SW integrity test:     {}", if sw_ok    { "PASS" } else { "FAIL" });
-        assert!(shake_ok, "SHAKE256 KAT failed — check andna_transcript::run_shake256_kat()");
-        assert!(mldsa_ok, "ML-DSA-44 KAT failed — KAT_PK/KAT_SIG vectors are stale or mismatched");
-        assert!(sw_ok,    "Software integrity test failed");
-    }
-
+    
     /// Generate and print the ML-DSA-44 KAT vectors for embedding.
     /// Run with: cargo test -p andna-ffi --features oqs-backend -- --nocapture kat_vector_gen
     /// Copy the printed output into KAT_PK and KAT_SIG at the top of lib.rs.

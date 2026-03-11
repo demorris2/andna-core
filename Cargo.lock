@@ -53,6 +53,7 @@ dependencies = [
  "andna-codec",
  "andna-contracts",
  "andna-core",
+ "andna-transcript",
  "oqs",
  "sha3",
 ]
