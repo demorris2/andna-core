@@ -13,7 +13,74 @@ use andna_audit::{global_sink, init_sink_if_needed, VerifyEventInput};
 use andna_contracts::*;
 use andna_core::VerifyError;
 use std::panic;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+// ── Module state machine ───────────────────────────────────────────────────
+//
+// The module must be initialized via `andna_init()` before any cryptographic
+// function may be called. The state machine prevents any output from being
+// produced before power-up self-tests complete.
+//
+// State transitions:
+//   PRE_INIT(0)  ──[andna_init called]──► IN_PROGRESS(2)
+//   IN_PROGRESS  ──[all KATs pass]──────► APPROVED(1)
+//   IN_PROGRESS  ──[any KAT fails]──────► ERROR(-1)
+//   APPROVED     ──[andna_init called]──► APPROVED(1)  (idempotent)
+//   ERROR        ──[module reloaded]────► PRE_INIT(0)  (only via process restart)
+//
+// A concurrent second call to andna_init() while IN_PROGRESS returns Internal.
+// ERROR is sticky — the module must be reloaded (process restart) to recover.
+
+const STATE_PRE_INIT: i32 = 0;
+const STATE_APPROVED: i32 = 1;
+const STATE_ERROR: i32 = -1;
+const STATE_IN_PROGRESS: i32 = 2;
+
+static MODULE_STATE: AtomicI32 = AtomicI32::new(STATE_PRE_INIT);
+
+// ── Approved-mode guard ────────────────────────────────────────────────────
+//
+// Insert `require_approved!()` at the top of every cryptographic function,
+// after null/length checks but before ffi_guard. Returns Internal if the
+// module has not been successfully initialized.
+
+macro_rules! require_approved {
+    () => {
+        if MODULE_STATE.load(Ordering::Relaxed) != STATE_APPROVED {
+            return AndnaErr::Internal;
+        }
+    };
+}
+
+// ── ML-DSA-44 KAT vectors ──────────────────────────────────────────────────
+//
+// Pre-embedded (pk, msg, sig) triple for the power-up Known Answer Test.
+// These are PLACEHOLDER zero bytes. The module will correctly fail to enter
+// Approved Mode with zero bytes — this is intentional.
+//
+// To generate real vectors:
+//   1. Run: cargo test -p andna-ffi --features oqs-backend -- --nocapture kat_vector_gen
+//   2. Copy the printed hex arrays into the three constants below.
+//   3. Rebuild. andna_init() will now pass the ML-DSA-44 KAT.
+//
+// See: fips/kat_vector_gen_procedure.md for the full procedure.
+
+/// ML-DSA-44 KAT public key (1312 bytes: rho=32 + t1=1280).
+/// PLACEHOLDER — replace with output of `kat_vector_gen` test.
+#[cfg(feature = "oqs-backend")]
+const KAT_PK: [u8; 1312] = [0u8; 1312];
+
+/// ML-DSA-44 KAT message (64-byte zeroed mu).
+/// The KAT signs and verifies a 64-byte all-zero message, matching the
+/// output length of the SHAKE256 mu derivation used in production.
+#[cfg(feature = "oqs-backend")]
+const KAT_MSG: [u8; 64] = [0u8; 64];
+
+/// ML-DSA-44 KAT signature (2420 bytes).
+/// PLACEHOLDER — replace with output of `kat_vector_gen` test.
+#[cfg(feature = "oqs-backend")]
+const KAT_SIG: [u8; SIG_LEN] = [0u8; SIG_LEN];
 
 #[inline]
 fn now_unix_ms() -> u64 {
@@ -75,6 +142,186 @@ fn ffi_guard<F: FnOnce() -> AndnaErr + panic::UnwindSafe>(f: F) -> AndnaErr {
     }
 }
 
+// ── SHAKE256 KAT ──────────────────────────────────────────────────────────
+//
+// Calls into andna_transcript::run_shake256_kat(), which checks three
+// fixed-input / fixed-output vectors hardcoded in the transcript crate:
+//   KAT-T0: pk_hash(zeros_1336)   — exercises the T_E encoding path
+//   KAT-T1: pk_hash(patterned_te) — exercises non-trivial input
+//   KAT-T2: mu(zeros_274)         — exercises the mu_pre derivation path
+//
+// All three vectors were cross-validated against Python hashlib.shake_256.
+// Returns true only if all three pass. Any mismatch returns false.
+
+fn run_shake256_kat() -> bool {
+    andna_transcript::run_shake256_kat()
+}
+
+// ── ML-DSA-44 KAT ─────────────────────────────────────────────────────────
+//
+// Verifies a pre-embedded (pk, msg, sig) triple against the real liboqs
+// ML-DSA-44 implementation. Two checks are performed:
+//   ACCEPT: verify(KAT_MSG, KAT_SIG, KAT_PK)  must return Ok
+//   REJECT: verify(KAT_MSG, corrupted_sig, KAT_PK) must return Err
+//
+// Both checks must pass. If either fails, the module enters Error State.
+//
+// NOTE: KAT_PK and KAT_SIG are currently zero-filled placeholders.
+// The ACCEPT check will correctly fail with zero bytes, preventing the module
+// from entering Approved Mode until real vectors are embedded.
+// See: fips/kat_vector_gen_procedure.md
+
+#[cfg(feature = "oqs-backend")]
+fn run_mldsa44_kat() -> bool {
+    let scheme = match oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    // Build oqs PublicKey and Signature views from the embedded const bytes.
+    let pk = match scheme.public_key_from_bytes(&KAT_PK) {
+        Some(k) => k,
+        None => return false,
+    };
+    let sig = match scheme.signature_from_bytes(&KAT_SIG) {
+        Some(s) => s,
+        None => return false,
+    };
+
+    // Check 1: valid (pk, msg, sig) triple must ACCEPT.
+    if scheme.verify(&KAT_MSG, &sig, &pk).is_err() {
+        return false;
+    }
+
+    // Check 2: one-bit corruption of sig must REJECT.
+    let mut corrupted = KAT_SIG;
+    corrupted[0] ^= 0x01;
+    let bad_sig = match scheme.signature_from_bytes(&corrupted) {
+        Some(s) => s,
+        // If the corrupted bytes are not a valid encoding, that is also a
+        // rejection — count it as a pass for the REJECT check.
+        None => return true,
+    };
+    if scheme.verify(&KAT_MSG, &bad_sig, &pk).is_ok() {
+        // A corrupted signature verified as valid — catastrophic failure.
+        return false;
+    }
+
+    true
+}
+
+// Stub for builds without the real backend. Always fails so that the module
+// cannot enter Approved Mode without liboqs.
+#[cfg(not(feature = "oqs-backend"))]
+fn run_mldsa44_kat() -> bool {
+    false
+}
+
+// ── Software integrity test ────────────────────────────────────────────────
+//
+// Verifies the module binary has not been modified since the validated build.
+// This is a blocking FIPS 140-3 requirement before CST lab submission.
+//
+// The `fips-integrity-stub` feature explicitly bypasses this check during
+// development. It MUST NOT be present in any Approved Mode artifact.
+// The compile_error! below enforces this at build time when the stub is absent.
+
+fn run_software_integrity_test() -> bool {
+    #[cfg(not(feature = "fips-integrity-stub"))]
+    {
+        // When fips-integrity-stub is not set, the real implementation is
+        // required. compile_error! fires at build time to prevent accidental
+        // shipping of an artifact without the integrity check.
+        compile_error!(
+            "Software integrity test not implemented. \
+             Enable the 'fips-integrity-stub' feature for development builds, \
+             or implement the HMAC-SHA-256 digest check before CST lab submission. \
+             See: fips/algorithm_inventory.md Section 4.1"
+        );
+    }
+
+    // Development stub: passes unconditionally.
+    // Gate: this code path is only reachable when fips-integrity-stub is set.
+    #[cfg(feature = "fips-integrity-stub")]
+    true
+}
+
+/// Power-up self-test gate. Must be called before any other exported function.
+///
+/// Runs the following self-tests in sequence:
+///   1. SHAKE256 KAT (three fixed-input vectors)
+///   2. ML-DSA-44 KAT (sigVer ACCEPT + REJECT checks)
+///   3. Software integrity test (HMAC of libandna_ffi.so)
+///
+/// Returns `Ok` if all tests pass and the module transitions to Approved Mode.
+/// Returns `Internal` on any failure; the module enters a sticky Error State
+/// and must be reloaded (process restart) to attempt re-initialization.
+///
+/// Calling `andna_init()` a second time when already in Approved Mode returns
+/// `Ok` immediately (idempotent — safe for multi-threaded callers).
+///
+/// No other exported function produces cryptographic output until this
+/// function returns `Ok`.
+#[no_mangle]
+pub extern "C" fn andna_init() -> AndnaErr {
+    // Fast path: already approved — idempotent, safe for repeated calls.
+    // Uses Relaxed here; the SeqCst store at the end of the first successful
+    // init creates the necessary happens-before for any subsequent caller.
+    if MODULE_STATE.load(Ordering::Relaxed) == STATE_APPROVED {
+        return AndnaErr::Ok;
+    }
+
+    // Attempt to take ownership of the initialization sequence.
+    // CAS: PRE_INIT(0) → IN_PROGRESS(2)
+    match MODULE_STATE.compare_exchange(
+        STATE_PRE_INIT,
+        STATE_IN_PROGRESS,
+        Ordering::SeqCst,
+        Ordering::SeqCst,
+    ) {
+        Ok(_) => {
+            // This thread owns the init sequence. Proceed below.
+        }
+        Err(STATE_APPROVED) => {
+            // Another thread completed init successfully while we were racing.
+            return AndnaErr::Ok;
+        }
+        Err(_) => {
+            // Either ERROR(-1) — sticky failure, requires reload.
+            // Or IN_PROGRESS(2) — concurrent init call, not supported.
+            return AndnaErr::Internal;
+        }
+    }
+
+    // ── Self-test sequence ─────────────────────────────────────────────────
+    // Each test transitions to ERROR on failure (sticky — no recovery without
+    // reload). On any failure the function returns Internal immediately.
+
+    // 1. SHAKE256 KAT
+    if !run_shake256_kat() {
+        MODULE_STATE.store(STATE_ERROR, Ordering::SeqCst);
+        return AndnaErr::Internal;
+    }
+
+    // 2. ML-DSA-44 KAT
+    if !run_mldsa44_kat() {
+        MODULE_STATE.store(STATE_ERROR, Ordering::SeqCst);
+        return AndnaErr::Internal;
+    }
+
+    // 3. Software integrity test
+    if !run_software_integrity_test() {
+        MODULE_STATE.store(STATE_ERROR, Ordering::SeqCst);
+        return AndnaErr::Internal;
+    }
+
+    // All tests passed. Transition to Approved Mode.
+    // SeqCst ensures all subsequent Relaxed loads in require_approved!() see
+    // STATE_APPROVED after this store completes.
+    MODULE_STATE.store(STATE_APPROVED, Ordering::SeqCst);
+    AndnaErr::Ok
+}
+
 /// Verify mu_pre + T_E + signature.
 ///
 /// # Safety
@@ -98,6 +345,9 @@ pub unsafe extern "C" fn andna_verify_vnext(
     if mu_pre_len != MU_PRE_LEN || te_len != TE_LEN || sig_len != SIG_LEN {
         return AndnaErr::Length;
     }
+
+    // Module must be in Approved Mode before any cryptographic output.
+    require_approved!();
 
     // Copy raw pointers to local variables for UnwindSafe
     let mp = mu_pre;
@@ -140,6 +390,9 @@ pub unsafe extern "C" fn andna_verify_frame_v2(frame: *const u8, frame_len: usiz
     if frame.is_null() || frame_len != FRAME_V2_LEN {
         return AndnaErr::Length;
     }
+
+    // Module must be in Approved Mode before any cryptographic output.
+    require_approved!();
 
     let f = frame;
 
@@ -201,6 +454,9 @@ pub unsafe extern "C" fn andna_parse_mu_pre_header(
         return AndnaErr::Length;
     }
 
+    // Module must be in Approved Mode before any cryptographic output.
+    require_approved!();
+
     let mp = mu_pre;
     let od = out_device_id32;
     let oe = out_epoch;
@@ -243,6 +499,9 @@ pub unsafe extern "C" fn andna_gen_test_frame(out_ptr: *mut u8, out_len: usize) 
     if out_ptr.is_null() || out_len != FRAME_V2_LEN {
         return AndnaErr::Length;
     }
+
+    // Module must be in Approved Mode before any cryptographic output.
+    require_approved!();
 
     let outp = out_ptr;
 
@@ -529,5 +788,178 @@ mod tests {
             "verify rejected gen'd frame with code {:?}",
             vrc
         );
+    }
+
+    // ── andna_init tests ───────────────────────────────────────────────────
+
+    /// Reset MODULE_STATE to PRE_INIT for tests that need a clean slate.
+    /// Only called from tests — never from production code.
+    fn reset_module_state() {
+        MODULE_STATE.store(STATE_PRE_INIT, Ordering::SeqCst);
+    }
+
+    /// Without init, all four cryptographic functions must return Internal.
+    /// This validates that require_approved!() fires before any crypto work.
+    #[test]
+    fn ffi_requires_init_before_crypto() {
+        reset_module_state();
+
+        // andna_verify_vnext
+        let mu = [0u8; MU_PRE_LEN];
+        let te = [0u8; TE_LEN];
+        let sig = [0u8; SIG_LEN];
+        unsafe {
+            assert_eq!(
+                andna_verify_vnext(
+                    mu.as_ptr(), MU_PRE_LEN,
+                    te.as_ptr(), TE_LEN,
+                    sig.as_ptr(), SIG_LEN,
+                ),
+                AndnaErr::Internal,
+                "andna_verify_vnext should return Internal before init"
+            );
+        }
+
+        // andna_verify_frame_v2
+        let frame = [0u8; FRAME_V2_LEN];
+        unsafe {
+            assert_eq!(
+                andna_verify_frame_v2(frame.as_ptr(), FRAME_V2_LEN),
+                AndnaErr::Internal,
+                "andna_verify_frame_v2 should return Internal before init"
+            );
+        }
+
+        // andna_parse_mu_pre_header
+        let mut id32 = [0u8; 32];
+        let mut epoch: u64 = 0;
+        let mut sid = [0u8; 32];
+        unsafe {
+            assert_eq!(
+                andna_parse_mu_pre_header(
+                    mu.as_ptr(), MU_PRE_LEN,
+                    id32.as_mut_ptr(),
+                    &mut epoch as *mut u64,
+                    sid.as_mut_ptr(),
+                ),
+                AndnaErr::Internal,
+                "andna_parse_mu_pre_header should return Internal before init"
+            );
+        }
+
+        // andna_gen_test_frame
+        let mut out = [0u8; FRAME_V2_LEN];
+        unsafe {
+            assert_eq!(
+                andna_gen_test_frame(out.as_mut_ptr(), FRAME_V2_LEN),
+                AndnaErr::Internal,
+                "andna_gen_test_frame should return Internal before init"
+            );
+        }
+    }
+
+    /// Null/length checks must fire BEFORE the approved-mode guard so that
+    /// callers receive Length (not Internal) for malformed inputs regardless
+    /// of module state.
+    #[test]
+    fn ffi_null_check_precedes_approved_guard() {
+        reset_module_state();
+
+        unsafe {
+            // Null pointer must return Length even when not initialized.
+            let r = andna_verify_vnext(
+                core::ptr::null(), MU_PRE_LEN,
+                core::ptr::null(), TE_LEN,
+                core::ptr::null(), SIG_LEN,
+            );
+            assert_eq!(r, AndnaErr::Length);
+
+            assert_eq!(
+                andna_verify_frame_v2(core::ptr::null(), FRAME_V2_LEN),
+                AndnaErr::Length
+            );
+        }
+    }
+
+    /// andna_init() with placeholder zero KAT vectors must return Internal
+    /// (the ML-DSA-44 KAT will fail to verify a zero signature against a
+    /// zero public key). This validates that the KAT gate is live and that
+    /// the module correctly refuses to enter Approved Mode with bad vectors.
+    ///
+    /// This test PASSES when KAT vectors are placeholders (expected behavior).
+    /// Once real vectors are embedded, this test must be updated to expect Ok.
+    #[cfg(feature = "oqs-backend")]
+    #[test]
+    fn ffi_init_fails_with_placeholder_kat_vectors() {
+        reset_module_state();
+        let r = andna_init();
+        // With placeholder zero bytes, the ML-DSA-44 KAT must fail.
+        // If this test starts returning Ok, the KAT gate is broken.
+        assert_eq!(
+            r, AndnaErr::Internal,
+            "andna_init should fail with placeholder KAT vectors"
+        );
+        // Module must be in Error State after failed init.
+        assert_eq!(
+            MODULE_STATE.load(Ordering::Relaxed),
+            STATE_ERROR,
+            "MODULE_STATE should be ERROR after failed init"
+        );
+    }
+
+    /// Once real KAT vectors are embedded, andna_init() must return Ok and
+    /// the module must be in Approved Mode. Replace the cfg gate below with
+    /// `#[test]` after embedding vectors via the kat_vector_gen procedure.
+    ///
+    /// Also validates idempotency: a second call must also return Ok.
+    #[cfg(all(feature = "oqs-backend", feature = "fips-kat-vectors-embedded"))]
+    #[test]
+    fn ffi_init_succeeds_with_real_kat_vectors() {
+        reset_module_state();
+        assert_eq!(andna_init(), AndnaErr::Ok);
+        assert_eq!(MODULE_STATE.load(Ordering::Relaxed), STATE_APPROVED);
+
+        // Second call must be idempotent.
+        assert_eq!(andna_init(), AndnaErr::Ok);
+        assert_eq!(MODULE_STATE.load(Ordering::Relaxed), STATE_APPROVED);
+    }
+
+    /// Generate and print the ML-DSA-44 KAT vectors for embedding.
+    /// Run with: cargo test -p andna-ffi --features oqs-backend -- --nocapture kat_vector_gen
+    /// Copy the printed output into KAT_PK and KAT_SIG at the top of lib.rs.
+    #[cfg(feature = "oqs-backend")]
+    #[test]
+    fn kat_vector_gen() {
+        let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
+            .expect("ML-DSA-44 scheme init failed");
+        let (pk, sk) = scheme.keypair().expect("keypair gen failed");
+
+        let msg = [0u8; 64]; // KAT_MSG — always zeros
+        let sig = scheme.sign(&msg, &sk).expect("sign failed");
+
+        let pk_bytes = pk.as_ref();
+        let sig_bytes = sig.as_ref();
+
+        assert_eq!(pk_bytes.len(), 1312, "unexpected PK length");
+        assert_eq!(sig_bytes.len(), SIG_LEN, "unexpected SIG length");
+
+        // Verify the triple is self-consistent before printing.
+        scheme.verify(&msg, &sig, &pk).expect("self-verify failed");
+
+        println!("\n=== ML-DSA-44 KAT VECTORS — copy into lib.rs ===");
+        print!("const KAT_PK: [u8; 1312] = [");
+        for (i, b) in pk_bytes.iter().enumerate() {
+            if i > 0 { print!(", "); }
+            print!("0x{:02x}", b);
+        }
+        println!("];");
+
+        print!("const KAT_SIG: [u8; {}] = [", SIG_LEN);
+        for (i, b) in sig_bytes.iter().enumerate() {
+            if i > 0 { print!(", "); }
+            print!("0x{:02x}", b);
+        }
+        println!("];");
+        println!("=== END KAT VECTORS ===\n");
     }
 }
