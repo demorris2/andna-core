@@ -14,7 +14,7 @@
 | Version byte          | `0x01`             | `andna_contracts::MU_PRE_VERSION_VAL` |
 | Transcript hash       | SHAKE256           | `andna_transcript` crate |
 | ML-DSA-44 parameters  | FIPS 204 Category 2 | `andna_mldsa44` crate |
-| T_E size              | 1338 bytes         | `andna_contracts::TE_LEN` |
+| T_E size              | 1336 bytes         | `andna_contracts::TE_LEN` |
 | Signature size        | 2420 bytes         | `andna_contracts::SIG_LEN` |
 | PK hash size          | 64 bytes           | `andna_contracts::PK_HASH_LEN` |
 

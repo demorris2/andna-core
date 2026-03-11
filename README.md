@@ -154,7 +154,7 @@ Switch backend: `VERIFY_ENGINE=rust` + `ANDNA_LIB_PATH=/path/to/libandna_ffi.so`
 | transcript  | ✅ Complete      | Real SHAKE256, constant-time comparison   |
 | mldsa44     | ✅ Complete      | liboqs backend (default), stub fallback   |
 | core        | ✅ Complete      | Orchestrator: parse → pk_hash → μ → verify |
-| ffi         | ✅ Complete      | 5 C ABI functions, 8 error codes          |
+| ffi         | ✅ Complete      | 7 C ABI functions, 8 error codes          |
 | Python      | ✅ Complete      | ctypes bindings, engine router, frame packer |
 
 ## Test Inventory

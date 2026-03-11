@@ -1,0 +1,111 @@
+{
+  "document_type": "FIPS 140-3 Build Manifest",
+  "schema_version": "1.0",
+  "generated": "2026-03-10",
+  "status": "AUTHORITATIVE — Gate 1 Verified, All Fields Complete",
+
+  "module": {
+    "name": "AN-DNA Core Verification Library",
+    "version": "1.0.0",
+    "fips_target": "140-3 Level 1",
+    "embodiment": "software",
+    "artifact_name": "libandna_ffi",
+    "artifact_extensions": ["so", "a"]
+  },
+
+  "build_environment": {
+    "base_image": {
+      "name": "debian:bookworm-slim",
+      "digest": "sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421"
+    },
+    "architecture": "x86_64",
+    "rust_toolchain": {
+      "version": "1.76.0",
+      "pin_mechanism": "ARG RUST_VERSION=1.76.0 in Dockerfile"
+    },
+    "liboqs": {
+      "version": "0.10.1",
+      "pin_mechanism": "ARG LIBOQS_VERSION=0.10.1 in Dockerfile",
+      "build_from": "source"
+    },
+    "container_runtime": "Docker Engine (Linux) / Docker Desktop (WSL2 backend)"
+  },
+
+  "deterministic_build_flags": {
+    "SOURCE_DATE_EPOCH": "0",
+    "CMAKE_BUILD_TYPE": "Release",
+    "cmake_flags": [
+      "-DOQS_DIST_BUILD=ON",
+      "-DBUILD_SHARED_LIBS=ON"
+    ],
+    "c_flags": [
+      "-ffile-prefix-map=/workspace=."
+    ],
+    "notes": [
+      "-DOQS_DIST_BUILD=ON prevents AVX/AVX2 divergence across CPU microarchitectures",
+      "-ffile-prefix-map strips absolute build paths from object files",
+      "SOURCE_DATE_EPOCH=0 enforces deterministic timestamps in all build artifacts"
+    ]
+  },
+
+  "build_commands": {
+    "step_1_liboqs": "cmake -DOQS_DIST_BUILD=ON -DBUILD_SHARED_LIBS=ON .. && make -j$(nproc)",
+    "step_2_module": "cargo build --release -p andna-ffi",
+    "step_3_verify": "sha256sum target/release/libandna_ffi.so"
+  },
+
+  "approved_mode_feature_flag": {
+    "flag": "oqs-backend",
+    "description": "Enables real FIPS 204 ML-DSA-44 via liboqs. Required for Approved Mode operation.",
+    "prohibited_in_approved_mode": "stub",
+    "stub_note": "The 'stub' feature is an always-pass CI bootstrap shim. It is excluded from the FIPS boundary and must never be compiled into an Approved Mode artifact."
+  },
+
+  "output_artifacts": [
+    {
+      "filename": "libandna_ffi.so",
+      "type": "shared library",
+      "approved_mode": true,
+      "sha256": "231778903c6c2c345d3eaba423800bc7ec3edb42750518034f083cba40a2ecef",
+      "verification_source": "gate1_hostB_report.json",
+      "cross_platform_verified": true,
+      "verified_hosts": [
+        {
+          "host_id": "Host A",
+          "environment": "Windows / WSL2 (local development)"
+        },
+        {
+          "host_id": "Host B",
+          "environment": "Ephemeral Ubuntu — GitHub Actions (remote CI)"
+        }
+      ]
+    },
+    {
+      "filename": "libandna_ffi.a",
+      "type": "static library",
+      "approved_mode": true,
+      "sha256": "2eca1b82ea774108a7169bd36971173c8ed29661374e572faceeccd3813befab",
+      "note": "Static artifact produced by same build invocation as .so"
+    }
+  ],
+
+  "gate1_reference": {
+    "report_file": "gate1_hostB_report.json",
+    "ci_workflow": "gate1.yml",
+    "golden_hash": "231778903c6c2c345d3eaba423800bc7ec3edb42750518034f083cba40a2ecef",
+    "verified_date": "2026-03-03",
+    "result": "PASS — exact SHA-256 match across Host A and Host B"
+  },
+
+  "cargo_lock": {
+    "file": "Cargo.lock",
+    "note": "Cargo.lock is committed to the repository and pins all transitive Rust dependencies. Must not be regenerated between build and validation."
+  },
+
+  "non_claims": [
+    "This document does not constitute FIPS 140-3 validation.",
+    "FIPS 140-3 validation requires testing by an accredited CST laboratory under a CMVP contract.",
+    "The Golden Hash certifies build reproducibility within the defined build lane only.",
+    "No CAVP certificates have been issued for ML-DSA-44 or SHAKE256 in this module as of the document date."
+  ]
+}
