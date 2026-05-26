@@ -128,6 +128,16 @@ fn cmd_version() {
     println!("andna {}", cstr.to_str().unwrap_or("unknown"));
 }
 
+fn ensure_andna_init() -> Result<(), String> {
+    let rc = andna_ffi::andna_init();
+
+    if rc == AndnaErr::Ok {
+        Ok(())
+    } else {
+        Err(format!("andna_init failed: {:?} ({})", rc, strerror(rc)))
+    }
+}
+
 fn cmd_verify(args: &[String]) -> i32 {
     if args.len() != 1 {
         usage();
@@ -141,6 +151,11 @@ fn cmd_verify(args: &[String]) -> i32 {
             return 2;
         }
     };
+
+    if let Err(e) = ensure_andna_init() {
+        eprintln!("error: {}", e);
+        return 1;
+    }
 
     let start = std::time::Instant::now();
     let err = unsafe { andna_verify_frame_v2(frame.as_ptr(), frame.len()) };
@@ -270,6 +285,11 @@ fn replay_with_frame(replay: &ReplayFile, frame_path: &Path) -> i32 {
         println!("    Frame may not be from this verification session.\n");
         return 1;
     };
+
+    if let Err(e) = ensure_andna_init() {
+        eprintln!("error: {}", e);
+        return 1;
+    }
 
     let err = unsafe { andna_verify_frame_v2(frame.as_ptr(), frame.len()) };
     let new_decision = if err == AndnaErr::Ok {
@@ -403,6 +423,12 @@ fn cmd_gen(args: &[String]) -> i32 {
     }
     let output = Path::new(&args[0]);
     let mut frame = vec![0u8; FRAME_V2_LEN];
+
+    if let Err(e) = ensure_andna_init() {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+
     let rc = unsafe { andna_gen_test_frame(frame.as_mut_ptr(), frame.len()) };
     if rc != AndnaErr::Ok {
         eprintln!("error: andna_gen_test_frame failed: {}", strerror(rc));
@@ -486,6 +512,11 @@ fn cmd_verify_frame_legacy(args: &[String]) -> i32 {
         hex_decode(&args[0])
     };
 
+    if let Err(e) = ensure_andna_init() {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+
     let result = unsafe { andna_verify_frame_v2(frame_bytes.as_ptr(), frame_bytes.len()) };
     let msg = strerror(result);
 
@@ -544,6 +575,18 @@ fn cmd_smoke() -> i32 {
         } else {
             fail += 1;
         }
+    }
+
+    // FIPS Approved Mode entry before crypto-facing smoke tests
+    if let Err(e) = ensure_andna_init() {
+        println!("  [FAIL] andna_init: {}", e);
+        fail += 1;
+
+        println!("\n=== Results: {} passed, {} failed ===", pass, fail);
+        return 1;
+    } else {
+        println!("  [PASS] andna_init: Approved Mode entered");
+        pass += 1;
     }
 
     // Test 3: null rejection
