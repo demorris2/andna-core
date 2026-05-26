@@ -78,8 +78,11 @@ These components are explicitly excluded from the FIPS logical boundary. No secu
 | Demo scripts and integration tooling | Not part of the module under test. |
 | AIPMP | Internal product management tooling. Not part of the module under test. |
 | `stub` feature of `andna-mldsa44` | Always-pass CI bootstrap shim. Explicitly non-approved. Produces no real cryptographic output. Prohibited in Approved Mode builds. |
+| `fips-integrity-stub` feature of `andna-ffi` | **STUB / NON-CONFORMANT.** Placeholder software integrity shim. Does not perform real HMAC-SHA-256 binary integrity verification. P0 blocker — must be replaced with a real HMAC-SHA-256 check before CST lab submission. Prohibited in any Approved Mode artifact. |
 
-> **Note on `andna-audit`:** The AuditSink is called from within `andna_verify_frame_v2` at the FFI boundary, after the cryptographic verification result is determined. The audit append occurs after the crypto decision is complete; the AuditSink does not influence or participate in the cryptographic computation. The SHA3-256 hash chaining in the audit log serves audit integrity for the R1 Proof Pack, not FIPS-approved cryptographic services. The CST lab examiner should note that `andna_audit_export_jsonl` is listed in Section 4 for completeness of the FFI surface; no FIPS security claim is made for it.
+> **Python Boundary Note:** Python tooling (`python/andna/`, Replay Engine CLI, FastAPI layer) is **outside the FIPS cryptographic module boundary**. Python is non-authoritative and does not provide Approved Mode cryptographic services. The Python layer calls the module via ctypes FFI but is not compiled into it. No FIPS security claim applies to any Python component.
+
+> **Note on `andna-audit` and Audit Chain Boundary:** The AuditSink is called from within `andna_verify_frame_v2` at the FFI boundary, after the cryptographic verification result is determined. The audit append occurs after the crypto decision is complete; the AuditSink does not influence or participate in the cryptographic computation. The SHA3-256 hash chaining in the audit log serves audit integrity for the R1 Proof Pack, not FIPS-approved cryptographic services. Audit chain boundary recommendation: the SHA3-256 chain hash computation and the validator (`validate_jsonl`) are in-boundary only insofar as they are compiled into the Rust workspace — they are logically outside the FIPS cryptographic module boundary. JSONL serialization and all file I/O are out-of-boundary. The CST lab examiner should note that `andna_audit_export_jsonl` is listed in Section 4 for completeness of the FFI surface; no FIPS security claim is made for it.
 
 ---
 
@@ -89,8 +92,8 @@ The following functions constitute the complete public interface of the cryptogr
 
 | Export | Signature | FIPS Role | Description |
 |---|---|---|---|
-| `andna_init` | `() -> AndnaErr` | **Required init — not yet implemented** | Power-up self-test gate. Must be called before any other function. Runs SHAKE256 KAT, ML-DSA-44 KAT, and software integrity check in sequence. Returns `Ok` on success; `Internal` on any failure. Blocking requirement before CST lab submission. |
-| `andna_verify_vnext` | `(mu_pre: *const u8, mu_pre_len: usize, te: *const u8, te_len: usize, sig: *const u8, sig_len: usize) -> AndnaErr` | Cryptographic | Decomposed verifier. Accepts mu_pre (274 bytes), T_E (1338 bytes), and signature (2420 bytes) separately. Validates ML-DSA-44 transcript. Primary approved cryptographic service. |
+| `andna_init` | `() -> AndnaErr` | **Module Initialization** | Power-up self-test gate. Implemented on `fips/package-v1`; gates all cryptographic entry points through the Rust module state machine (Uninitialized → Approved / Error). SHAKE256 transcript KAT and ML-DSA-44 KAT are wired into the power-up self-test path. Software integrity check (HMAC-SHA-256) is a P0 blocker — currently stubbed via `fips-integrity-stub` **(STUB / NON-CONFORMANT — must be replaced before CST lab submission)**. Returns `Ok` on success; `Internal` on any failure. |
+| `andna_verify_vnext` | `(mu_pre: *const u8, mu_pre_len: usize, te: *const u8, te_len: usize, sig: *const u8, sig_len: usize) -> AndnaErr` | Cryptographic | Decomposed verifier. Accepts mu_pre (274 bytes), T_E (1336 bytes), and signature (2420 bytes) separately. Validates ML-DSA-44 transcript. Primary approved cryptographic service. |
 | `andna_verify_frame_v2` | `(frame: *const u8, frame_len: usize) -> AndnaErr` | Cryptographic | Packed Frame v2 verifier (4030 bytes = mu_pre \|\| T_E \|\| sig). Primary operational path. Calls `andna-core::verify_frame_v2` then appends one record to the AuditSink (boundary-excluded). |
 | `andna_parse_mu_pre_header` | `(mu_pre: *const u8, mu_pre_len: usize, out_device_id32: *mut u8, out_epoch: *mut u64, out_sid: *mut u8) -> AndnaErr` | Non-cryptographic | Fast-path header parser via `andna-codec`. Extracts `device_id32`, `epoch`, and `sid` from mu_pre for pre-crypto gating. No cryptographic operations. |
 | `andna_gen_test_frame` | `(out_ptr: *mut u8, out_len: usize) -> AndnaErr` | Test service | Generates a complete self-consistent 4030-byte Frame v2 (keygen → mu_pre construction → sign → pack). For KAT and integration testing only. Must not be used in production authentication flows. |
@@ -124,7 +127,7 @@ These values are enforced at compile time via `assert!` macros in `andna-contrac
 | Constant | Value | Description |
 |---|---|---|
 | `MU_PRE_LEN` | 274 bytes | Canonical fixed-width authentication payload buffer |
-| `TE_LEN` | 1338 bytes | Epoch Public Key: ρ(32) + t₁(1280) + epoch(8) + id16(16) + 2 reserved |
+| `TE_LEN` | 1336 bytes | Epoch Public Key: ρ(32) + t₁(1280) + epoch(8) + id16(16) |
 | `SIG_LEN` | 2420 bytes | ML-DSA-44 signature: z(2304) + h(84) + c̃(32) |
 | `FRAME_V2_LEN` | 4030 bytes | Packed frame: mu_pre + T_E + sig |
 | `PK_HASH_LEN` | 64 bytes | SHAKE256 output length for pk_hash and μ derivation |
@@ -211,7 +214,56 @@ Key safety properties enforced at the boundary:
 
 ---
 
-## 9. Non-Claims
+## 9. Module State Machine
+
+The module implements a three-state finite state machine enforced by an `AtomicI32` in `andna-ffi/src/init.rs`.
+
+| State | Integer | Description | Entry Condition |
+|---|---|---|---|
+| **Uninitialized** | 0 | Module loaded; `andna_init()` not yet called. All cryptographic FFI functions return `AndnaErr::Internal`. | Initial state on library load. |
+| **Approved** | 1 | All power-up self-tests passed. Full cryptographic services available. | `andna_init()` called and all KATs + integrity check returned pass. |
+| **Error** | -1 | Self-test failure or runtime integrity failure. All cryptographic FFI functions return `AndnaErr::Internal`. Module must be reloaded to exit. | Any self-test in `andna_init()` fails. |
+
+State transitions:
+- **Uninitialized → Approved:** `andna_init()` called; SHAKE256 KAT passes; ML-DSA-44 KAT passes; software integrity check passes (currently stubbed — P0 blocker).
+- **Uninitialized → Error:** Any self-test in `andna_init()` fails.
+- **Approved → Error:** Reserved for runtime integrity failure (future use).
+- **Error → Uninitialized:** Module unload and reload only.
+
+### 9.1 Cryptographic Services and Module Entry Points
+
+The following services are available **only in Approved state**:
+
+| Entry Point | Service |
+|---|---|
+| `andna_verify_vnext()` | ML-DSA-44 transcript verification (decomposed) |
+| `andna_verify_frame_v2()` | ML-DSA-44 transcript verification (packed frame) |
+| `andna_parse_mu_pre_header()` | mu_pre header parsing (non-cryptographic fast path) |
+| `andna_gen_test_frame()` | Test frame generation (ML-DSA-44 keygen + sign) |
+
+The following services are available in **all states** (informational, no cryptographic output):
+
+| Entry Point | Service |
+|---|---|
+| `andna_init()` | Module initialization / state transition |
+| `andna_strerror()` | Error string query |
+| `andna_version()` | Version string query |
+| `andna_audit_export_jsonl()` | Audit log export (boundary-excluded) |
+
+---
+
+## 10. P0 Blockers Before CST Lab Submission
+
+The following items are **blocking** for FIPS 140-3 submission. No other changes are required to the module architecture before lab engagement.
+
+| # | Blocker | Current State | Required |
+|---|---|---|---|
+| P0-1 | Software integrity check | **STUB / NON-CONFORMANT** — `fips-integrity-stub` feature; no real digest verification performed | Replace with HMAC-SHA-256 digest verification of `libandna_ffi.so` against a reference value embedded in the module |
+| P0-2 | ML-DSA-44 KAT vectors | Self-generated ACVP vectors (6 tests in `andna-mldsa44`). SHAKE256 KAT vectors are internally generated and verified. | Replace ML-DSA-44 sigVer vectors with official NIST ACVP vectors issued by the CST lab. SHAKE256 vectors require ACVP AFT confirmation. |
+
+---
+
+## 11. Non-Claims
 
 This document does not claim:
 
@@ -222,9 +274,10 @@ This document does not claim:
 
 ---
 
-## 10. Revision History
+## 12. Revision History
 
 | Version | Date | Change |
 |---|---|---|
 | 1.0.0 | 2026-03-10 | Initial draft. Gate 1 build parameters incorporated. Three-function FFI surface (speculative). |
-| 1.1.0 | 2026-03-10 | Full boundary pass from source inspection of `andna-ffi/src/lib.rs` and R1 artifacts. Added `andna-core` and `andna-codec` to Section 3.1 (two previously missing crates). Added `xtask`, `contracts_codegen`, `ffi_cli` to Section 3.2. Added Section 5 (protocol constants with authoritative TE_LEN=1338). Added Section 8 (design assurance: three-layer constant enforcement, cbindgen/xtask drift detection, parity anchor disambiguation, memory safety boundary detail). Updated Section 4 to reflect complete 8-function FFI surface (7 implemented + andna_init specified). Added AndnaErr enum table. Corrected return type from i32 to AndnaErr throughout. |
+| 1.1.0 | 2026-03-10 | Full boundary pass from source inspection of `andna-ffi/src/lib.rs` and R1 artifacts. Added `andna-core` and `andna-codec` to Section 3.1 (two previously missing crates). Added `xtask`, `contracts_codegen`, `ffi_cli` to Section 3.2. Added Section 5 (protocol constants with authoritative TE_LEN=1336). Added Section 8 (design assurance: three-layer constant enforcement, cbindgen/xtask drift detection, parity anchor disambiguation, memory safety boundary detail). Updated Section 4 to reflect complete 8-function FFI surface (7 implemented + andna_init specified). Added AndnaErr enum table. Corrected return type from i32 to AndnaErr throughout. |
+| 1.2.0 | 2026-05-25 | Updated Section 4: `andna_init()` is implemented on `fips/package-v1`; SHAKE256 and ML-DSA-44 KATs wired into power-up self-test path; STUB/NON-CONFORMANT label added for `fips-integrity-stub`. Corrected TE_LEN to 1336 (matches `TE_V1_LEN` compile-time assertion in `andna-contracts`; prior value was wrong). Removed erroneous "+2 reserved" from TE_LEN breakdown. Added Python boundary note. Refined audit chain boundary statement. Added Section 9 (State Machine + Cryptographic Services), Section 10 (P0 Blockers). Renumbered Non-Claims to Section 11. |

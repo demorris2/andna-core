@@ -87,6 +87,9 @@ and carry no FIPS security claim:
 - Demo scripts and integration tooling
 - AuditSink / Replay Engine (deterministic logging infrastructure)
 - The `stub` feature of `andna-mldsa44` (CI bootstrap shim — non-approved)
+- The `fips-integrity-stub` feature of `andna-ffi` **(STUB / NON-CONFORMANT)** — placeholder software integrity shim; carries no FIPS security claim
+
+> **Python Boundary Note:** Python tooling is **outside the FIPS cryptographic module boundary**. It is non-authoritative and does not provide Approved Mode cryptographic services. The Python layer calls the module via ctypes FFI but is not compiled into it.
 
 ### 1.4 Approved Mode Indicator
 
@@ -122,7 +125,7 @@ All functions return `AndnaErr` (a C-compatible `#[repr(C)]` enum with ABI-stabl
 
 | Function | Signature | FIPS Service | Description |
 |---|---|---|---|
-| `andna_init` | `() -> AndnaErr` | Module Initialization | **Required first call.** Runs all power-up self-tests (SHAKE256 KAT, ML-DSA-44 KAT, software integrity). Returns `Ok` on success; `Internal` on self-test failure. No cryptographic function may be called before `andna_init` returns `Ok`. **Not yet implemented — blocking for CST lab submission.** |
+| `andna_init` | `() -> AndnaErr` | Module Initialization | **Required first call.** Implemented on `fips/package-v1`; gates all cryptographic entry points through the Rust module state machine. SHAKE256 transcript KAT and ML-DSA-44 KAT are wired into the power-up self-test path. Software integrity check is stubbed via `fips-integrity-stub` **(STUB / NON-CONFORMANT — P0 blocker for CST lab submission)**. Returns `Ok` on success; `Internal` on self-test failure. No cryptographic function may be called before `andna_init` returns `Ok`. |
 | `andna_verify_vnext` | `(mu_pre: *const u8, mu_pre_len: usize, te: *const u8, te_len: usize, sig: *const u8, sig_len: usize) -> AndnaErr` | Proof Verification | Decomposed verifier. Accepts mu_pre (274 bytes), T_E, and signature separately. Validates ML-DSA-44 transcript. Returns `Ok` (ACCEPT) or a specific reject code. |
 | `andna_verify_frame_v2` | `(frame: *const u8, frame_len: usize) -> AndnaErr` | Proof Verification (packed) | Primary operational path. Accepts packed 4030-byte Frame v2 (mu_pre \|\| T_E \|\| sig). Runs verification and appends one record to the Rust-owned AuditSink. |
 | `andna_parse_mu_pre_header` | `(mu_pre: *const u8, mu_pre_len: usize, out_device_id32: *mut u8, out_epoch: *mut u64, out_sid: *mut u8) -> AndnaErr` | Header Parsing | Pre-crypto fast-path parser. Extracts `device_id32`, `epoch`, and `sid` from mu_pre for gating logic before committing to full verification. No cryptographic operations. |
@@ -305,7 +308,7 @@ before any cryptographic output is produced.
 | **Purpose** | Detect unauthorized modification of the module binary |
 | **Mechanism** | Digest verification of `libandna_ffi.so` |
 | **Failure action** | Module enters Error State; all FFI functions return error code |
-| **Implementation status** | **Not yet implemented — blocking for CST lab submission** |
+| **Implementation status** | **STUB / NON-CONFORMANT — `fips-integrity-stub` feature active. P0 blocker: must be replaced with real HMAC-SHA-256 digest verification before CST lab submission.** |
 
 #### 7.1.2 ML-DSA-44 Known Answer Test (KAT)
 
@@ -313,10 +316,10 @@ before any cryptographic output is produced.
 |---|---|
 | **Purpose** | Verify correct operation of the ML-DSA-44 signature verification primitive |
 | **Test type** | sigVer KAT — fixed keypair, fixed message, fixed signature |
-| **Vectors** | 6 ACVP self-generated vectors in `andna-mldsa44`; NIST-issued ACVP vectors to be substituted at CST lab engagement |
+| **Vectors** | 6 ACVP self-generated vectors in `andna-mldsa44`. P0 blocker: NIST-issued ACVP sigVer vectors must be substituted at CST lab engagement. |
 | **Pass condition** | Valid signature: ACCEPT. Corrupted signature (one bit flipped): REJECT. |
 | **Failure action** | Module enters Error State; all FFI functions return error code |
-| **Implementation status** | Vectors exist and pass in `cargo test`. **Wire into `andna_init()` path required before submission.** |
+| **Implementation status** | **Wired into `andna_init()` power-up self-test path on `fips/package-v1`. Passes in `cargo test -p andna-ffi` with FIPS features (12/12).** Remaining P0 blocker: replace self-generated vectors with NIST ACVP sigVer vectors. |
 
 #### 7.1.3 SHAKE256 Known Answer Test (KAT)
 
@@ -327,7 +330,7 @@ before any cryptographic output is produced.
 | **Vectors** | Hardcoded in `crates/transcript/src/lib.rs`. Cross-language parity confirmed against Python `hashlib.shake_256`. Regenerated via `python3 tests/generate_transcript_kats.py --verify` |
 | **Pass condition** | All three 64-byte output vectors match hardcoded reference values exactly |
 | **Failure action** | Module enters Error State; all FFI functions return error code |
-| **Implementation status** | Vectors exist and pass in `cargo test`. **Wire into `andna_init()` path required before submission.** |
+| **Implementation status** | **Wired into `andna_init()` power-up self-test path on `fips/package-v1`. Passes in `cargo test -p andna-ffi` with FIPS features (12/12).** |
 
 ### 7.2 Conditional Self-Tests
 
@@ -544,8 +547,20 @@ This document and the associated FIPS package do not claim:
 
 ---
 
+## P0 Blockers Before CST Lab Submission
+
+The following items must be resolved before this security policy is submitted to the CST laboratory:
+
+| # | Blocker | Current State | Required |
+|---|---|---|---|
+| P0-1 | Software integrity check | **STUB / NON-CONFORMANT** — `fips-integrity-stub` feature; no real digest verification performed | Replace with HMAC-SHA-256 (FIPS 198-1) digest verification of `libandna_ffi.so` against a reference value embedded in the module |
+| P0-2 | ML-DSA-44 KAT vectors | Self-generated ACVP sigVer vectors (6 tests in `andna-mldsa44`). KAT is wired into `andna_init()` and passes. | Replace with official NIST ACVP sigVer vectors issued by the CST lab |
+
+---
+
 ## Revision History
 
 | Version | Date | Change |
 |---|---|---|
 | 1.0.0 | 2026-03-10 | Initial draft. All five FIPS package documents complete. Three blocking items identified: `andna_init()` implementation, KAT wiring into FFI init path, software integrity test. |
+| 1.1.0 | 2026-05-25 | Updated Section 2.1: `andna_init()` implemented on `fips/package-v1`; SHAKE256 and ML-DSA-44 KATs wired into power-up self-test path; software integrity labeled STUB/NON-CONFORMANT. Updated Section 7.1 self-test status. Added Python boundary note to Section 1.3. Added `fips-integrity-stub` exclusion. Added P0 Blockers section. |
