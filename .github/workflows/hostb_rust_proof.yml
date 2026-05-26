@@ -44,7 +44,8 @@ jobs:
               set -euo pipefail
               cd /build
 
-              cargo build -p ffi-cli --release --features "oqs-backend fips-integrity-stub fips-kat-vectors-embedded" --features "oqs-backend fips-integrity-stub fips-kat-vectors-embedded" --features "oqs-backend fips-integrity-stub fips-kat-vectors-embedded" --features "oqs-backend fips-integrity-stub fips-kat-vectors-embedded"
+              cargo build -p ffi-cli --release --features "oqs-backend fips-integrity-stub fips-kat-vectors-embedded"
+
 
               BIN="/build/target/release/andna"
               if [ ! -x "$BIN" ]; then
