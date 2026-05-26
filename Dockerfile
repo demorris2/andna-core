@@ -20,7 +20,14 @@ ENV CXXFLAGS="-ffile-prefix-map=/tmp/liboqs=. -ffile-prefix-map=/build=."
 ARG RUST_VERSION=1.76.0
 ARG LIBOQS_VERSION=0.10.1
 
-# ── System build dependencies (Fixed: Added libclang/llvm for bindgen) ──
+# ── FIPS feature set (development lane) ──
+# fips-integrity-stub: STUB / NON-CONFORMANT software integrity test.
+# fips-kat-vectors-embedded: SHAKE256 + ML-DSA-44 KAT vectors compiled in.
+# Real HMAC-SHA-256 software integrity is a P0 blocker for CST submission
+# (see fips/algorithm_inventory.md Section 4.1).
+ARG FIPS_FEATURES="oqs-backend fips-integrity-stub fips-kat-vectors-embedded"
+
+# ── System build dependencies ──
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -64,8 +71,24 @@ COPY . .
 ENV LIBCLANG_PATH=/usr/lib/llvm-14/lib
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
-RUN cargo build --release --all 2>&1 && \
-    cargo test --all 2>&1
+# ── Build with FIPS features and run smoke tests ──
+#
+# The andna-ffi crate enforces an explicit choice between fips-integrity-stub
+# (development) and a real HMAC-SHA-256 check (production) via a compile_error!
+# macro. Build commands must pass the FIPS feature set or the build fails.
+#
+# We build andna-ffi explicitly first (to produce libandna_ffi.so for the
+# runtime stage), then ffi-cli (to produce the andna binary). Tests run
+# against the FIPS-enabled feature set on the crates that have those features.
+RUN cargo build -p andna-ffi --release --features "${FIPS_FEATURES}" 2>&1 && \
+    cargo build -p ffi-cli  --release --features "${FIPS_FEATURES}" 2>&1 && \
+    cargo test  -p andna-ffi          --features "${FIPS_FEATURES}" 2>&1 && \
+    cargo test  -p andna-audit                                       2>&1 && \
+    cargo test  -p andna-core         --features "oqs-backend"       2>&1 && \
+    cargo test  -p andna-mldsa44      --features "oqs-backend"       2>&1 && \
+    cargo test  -p andna-transcript                                  2>&1 && \
+    cargo test  -p andna-codec                                       2>&1 && \
+    cargo test  -p andna-contracts                                   2>&1
 
 # ── Record build metadata ──
 RUN sha256sum target/release/libandna_ffi.so > /build/build-hashes.txt
