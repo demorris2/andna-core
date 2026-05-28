@@ -2,8 +2,8 @@
 
 **Document:** `/fips/algorithm_inventory.md`
 **Status:** Draft — Pre-CST Lab Submission
-**Version:** 1.0.0
-**Date:** 2026-03-10
+**Version:** 1.3.0
+**Date:** 2026-05-28
 **Prepared by:** Darrell Morris Jr. — ArcNeura
 **Reference:** FIPS 140-3, FIPS 202, FIPS 204, NIST SP 800-140C (CMVP Approved
 Security Functions)
@@ -121,13 +121,13 @@ an error state and return a failure code on all subsequent FFI calls until reloa
 |---|---|
 | **Test Type** | Conditional / Power-Up KAT |
 | **Algorithm** | ML-DSA-44 (FIPS 204) |
-| **Test Vector Source** | Internal ACVP self-gen — `tests/generate_acvp_vectors.py` (requires liboqs-python); 6 ACVP self-gen tests in `andna-mldsa44` crate |
-| **Test Operation** | Sign a fixed message with a fixed keypair; verify the produced signature (ACCEPT). Verify a corrupted signature (REJECT). Assert both outcomes match expected. |
-| **Trigger** | `andna_init()` power-up self-test path (wired on `fips/package-v1`). Also exercised by Rust test suite (`cargo test -p andna-mldsa44`). |
+| **Test Vector Source** | Official NIST ACVP-Server FIPS 204 sigVer vectors (external interface, preHash=pure). Vendored under `crates/mldsa44/tests/vectors/acvp_mldsa44_sigver.json` with SHA-256 manifest and provenance in `crates/mldsa44/tests/vectors/README.md`. Power-up KAT uses tcId 11 (expected-valid case). |
+| **Test Operation** | Verify the vendored ACVP signature against its public key and context via `verify_with_ctx_str` (ACCEPT). Verify a one-bit-corrupted signature (REJECT). Assert both outcomes match expected. |
+| **Trigger** | `andna_init()` power-up self-test path. Also exercised by the Rust test suite (`cargo test -p andna-mldsa44`), which runs the full vendored vector set. |
 | **Failure behavior** | Module enters error state; all FFI functions return error code |
-| **Tests location** | `crates/mldsa44/` — 4 unit + 5 liboqs roundtrip + 6 ACVP self-gen tests |
-| **ACVP vector generator** | `tests/generate_acvp_vectors.py` — generates sigVer vectors from liboqs-python |
-| **Status** | **Wired into `andna_init()` power-up self-test path. Passes: `cargo test -p andna-ffi` with FIPS features (12/12).** P0 blocker: replace self-generated ACVP vectors with official NIST ACVP sigVer vectors from CST lab. |
+| **Tests location** | `crates/mldsa44/` — 4 unit + 5 liboqs roundtrip + ACVP external/pure vector harness (`tests/acvp_sigver.rs`) |
+| **ACVP vector tooling** | `tests/download_nist_acvp.py` (fetches + filters external/pure vectors); `tests/extract_kat_for_ffi.py` + `tests/apply_acvp_kat_to_ffi.py` (reproducibility bridge to the embedded FFI KAT) |
+| **Status** | **Implemented.** Official NIST ACVP-Server external/pure sigVer vectors vendored and wired into `andna_init()`. Harness passes 10/10; `cargo test -p andna-ffi` with FIPS features passes 12/12. This is NOT an ACVP server test session or CAVP certificate — see Section 6. |
 
 ### 4.3 SHAKE256 Known Answer Test (KAT)
 
@@ -170,7 +170,8 @@ The following items must be resolved before this inventory is final:
 | Implement software integrity test (Section 4.1) | Engineering | **P0 — Blocking** | **STUB / NON-CONFORMANT** — `fips-integrity-stub` active. Replace with HMAC-SHA-256 (FIPS 198-1) implementation. |
 | ~~Wire SHAKE256 KAT into FFI init path as power-up self-test~~ | Engineering | ~~Blocking~~ | **CLOSED** — wired into `andna_init()` on `fips/package-v1`. Passes 12/12 FIPS feature tests. |
 | ~~Wire ML-DSA-44 KAT into FFI init path as power-up self-test~~ | Engineering | ~~Blocking~~ | **CLOSED** — wired into `andna_init()` on `fips/package-v1`. Passes 12/12 FIPS feature tests. |
-| Obtain fixed NIST ACVP sigVer vectors for ML-DSA-44 from CST lab | CST lab engagement | **P0 — Blocking** | Self-gen vectors wired and passing; NIST-issued ACVP sigVer vectors required for submission. |
+| ~~Replace self-generated ML-DSA-44 KAT with official NIST ACVP sigVer vectors~~ | Engineering | ~~P0~~ | **CLOSED** — official NIST ACVP-Server external/pure sigVer vectors vendored (`crates/mldsa44/tests/vectors/`) and wired into `andna_init()`. Harness 10/10; FFI 12/12. R1 `verification_digest` confirmed stable across local + Docker lanes. |
+| ACVP test session through accredited CST lab (CAVP certificate) | CST lab engagement | **P0 — Blocking submission** | Distinct from vendoring public reference vectors. A CST lab must run an ACVP session against the module to issue a CAVP certificate. Not yet engaged. |
 | ~~Confirm `andna-audit` hash chain does not use SHAKE256 inside boundary~~ | Engineering | ~~High~~ | **CLOSED — confirmed.** `andna-audit` uses `sha3-256` (fixed-output hash, FIPS 202) for the tamper-evident chain, not SHAKE256 (XOF). SHA3-256 is a distinct algorithm from SHAKE256. The audit chain operates entirely outside the FIPS boundary. No boundary impact. |
 | Record CAVP certificate numbers once issued | Post-lab | Post-submission | Pending lab engagement |
 
@@ -193,3 +194,4 @@ The following items must be resolved before this inventory is final:
 | 1.0.0 | 2026-03-10 | Initial draft. Two approved algorithms documented. Self-test requirements identified. Three blocking open items noted. |
 | 1.1.0 | 2026-03-10 | Closed andna-audit/SHAKE256 open item — confirmed SHA3-256 (not SHAKE256), outside boundary. Updated Section 5 algorithm use summary to include `andna_verify_frame_v2` as a path exercising ML-DSA-44 and SHAKE256. |
 | 1.2.0 | 2026-05-25 | Updated Sections 4.2/4.3: SHAKE256 and ML-DSA-44 KATs wired into `andna_init()` power-up self-test path on `fips/package-v1`; closed open items. Updated Section 4.1: software integrity labeled STUB/NON-CONFORMANT (`fips-integrity-stub`). Added Sections 2.3 (SHA-3-256, boundary-adjacent), 2.4 (HMAC-SHA-256, planned P0 blocker). Added `fips-integrity-stub` to Section 3 non-approved table. Updated Section 5 algorithm summary. Added Python boundary note. Updated Section 6 open items to reflect current status. |
+| 1.3.0 | 2026-05-28 | Section 4.2: replaced self-generated ML-DSA-44 KAT with official NIST ACVP-Server FIPS 204 sigVer vectors (external/pure interface, tcId 11) wired into `andna_init()`; harness 10/10, FFI 12/12. Section 6: closed the "replace self-gen vectors" open item; clarified that a CST-lab ACVP session for the CAVP certificate is a distinct, still-open P0. R1 proof-pack `verification_digest` confirmed stable across local (rustc 1.92.0) and pinned Docker (rustc 1.76.0) lanes. HMAC-SHA-256 software integrity remains the sole open engineering P0. |
