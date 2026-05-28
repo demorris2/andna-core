@@ -17,7 +17,7 @@ ENV CFLAGS="-ffile-prefix-map=/tmp/liboqs=. -ffile-prefix-map=/build=."
 ENV CXXFLAGS="-ffile-prefix-map=/tmp/liboqs=. -ffile-prefix-map=/build=."
 
 # ── Pin versions ──
-ARG RUST_VERSION=1.76.0
+ARG RUST_VERSION=1.93.1
 ARG LIBOQS_VERSION=0.10.1
 
 # ── FIPS feature set (development lane) ──
@@ -80,6 +80,7 @@ ENV LD_LIBRARY_PATH=/usr/local/lib
 # We build andna-ffi explicitly first (to produce libandna_ffi.so for the
 # runtime stage), then ffi-cli (to produce the andna binary). Tests run
 # against the FIPS-enabled feature set on the crates that have those features.
+ENV RUSTUP_TOOLCHAIN=${RUST_VERSION}
 RUN cargo build -p andna-ffi --release --features "${FIPS_FEATURES}" 2>&1 && \
     cargo build -p ffi-cli  --release --features "${FIPS_FEATURES}" 2>&1 && \
     cargo test  -p andna-ffi          --features "${FIPS_FEATURES}" 2>&1 && \
