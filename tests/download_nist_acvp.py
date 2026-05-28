@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
-Download official NIST ACVP ML-DSA-44 sigVer vectors and convert
-to the simplified JSON format consumed by our Rust test harness.
+Download official NIST ACVP ML-DSA-44 sigVer vectors (external/pure mode)
+and convert to the simplified JSON format consumed by our Rust test harness.
 
 Source:
   https://github.com/usnistgov/ACVP-Server/tree/master/gen-val/json-files/ML-DSA-sigVer-FIPS204
 
+Target interface:
+  parameterSet     = ML-DSA-44
+  signatureInterface = external   (raw message; IUT applies FIPS 204 wrapper)
+  preHash          = pure         (not HashML-DSA)
+
 Usage:
   python3 tests/download_nist_acvp.py
-
-  # Or specify a local directory with prompt.json + expectedResults.json:
   python3 tests/download_nist_acvp.py --local /path/to/ML-DSA-sigVer-FIPS204/
 
 Output:
   crates/mldsa44/tests/vectors/acvp_mldsa44_sigver.json
+  Each entry: {tcId, pk, message, context, signature, expected}
 """
 
 import json
@@ -51,33 +55,33 @@ def parse_nist_vectors(prompt_data, expected_data) -> list:
     """
     Parse NIST ACVP format into our simplified vector format.
 
-    NIST format has two files:
-      prompt.json:  [acvpVersion, {vsId, testGroups: [{tgId, parameterSet, tests: [{tcId, pk, message, signature}]}]}]
-      expectedResults.json: [acvpVersion, {vsId, testGroups: [{tgId, tests: [{tcId, testPassed}]}]}]
+    We target ML-DSA-44 external interface, pure mode (not preHash).
+    This matches liboqs's standard sign()/verify() API: the IUT receives
+    raw message + context and applies the FIPS 204 wrapper internally.
 
-    We only want ML-DSA-44 internal sigVer with externalMu=false (standard verification).
+    History: an earlier attempt filtered for signatureInterface=internal
+    + externalMu=false, which provides messages in a different format
+    that liboqs's public API does not accept directly. See
+    fips/acvp_sigver_deferral.md (now historical).
     """
-    # Build expected results lookup: tcId -> testPassed
     expected_map = {}
     expected_body = expected_data[1] if isinstance(expected_data, list) else expected_data
     for group in expected_body.get("testGroups", []):
         for test in group.get("tests", []):
             expected_map[test["tcId"]] = test["testPassed"]
 
-    # Parse prompt vectors, filter to ML-DSA-44
     vectors = []
     prompt_body = prompt_data[1] if isinstance(prompt_data, list) else prompt_data
     for group in prompt_body.get("testGroups", []):
         param_set = group.get("parameterSet", "")
-        sig_interface = group.get("signatureInterface", "internal")
-        external_mu = group.get("externalMu", False)
+        sig_interface = group.get("signatureInterface", "")
+        pre_hash = group.get("preHash", "")
 
-        # We only want ML-DSA-44, internal interface, non-external-mu
         if param_set != "ML-DSA-44":
             continue
-        if sig_interface != "internal":
+        if sig_interface != "external":
             continue
-        if external_mu:
+        if pre_hash != "pure":
             continue
 
         for test in group.get("tests", []):
@@ -90,6 +94,7 @@ def parse_nist_vectors(prompt_data, expected_data) -> list:
                 "tcId": tc_id,
                 "pk": test["pk"],
                 "message": test.get("message", ""),
+                "context": test.get("context", ""),
                 "signature": test["signature"],
                 "expected": expected_map[tc_id],
             })
