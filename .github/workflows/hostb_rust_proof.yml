@@ -29,6 +29,9 @@ jobs:
         run: |
           docker build --progress=plain --target builder -t andna-r1:builder .
 
+      - name: Show Gate 1 Golden Hash (libandna_ffi.so)
+        run: docker run --rm --entrypoint cat andna-r1:builder /build/build-hashes.txt
+
       - name: Run Rust proof cycle inside Docker (Rust CLI only)
         run: |
           set -euo pipefail
