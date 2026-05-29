@@ -2,7 +2,7 @@
 
 **Document:** `/fips/toolchain_pin.md`
 **Status:** Current
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Date:** 2026-05-28
 **Maintainer:** Darrell Morris Jr. — ArcNeura
 
@@ -112,7 +112,30 @@ during the transition.
 
 ---
 
-## 5. Non-Claims
+## 5. Related Reproducibility Hygiene — Line Endings
+
+The toolchain pin alone is not sufficient for cross-host bit-identical
+Rust builds. A separate input that must be normalized is **source file
+line endings**. Windows installs of Git default to `core.autocrlf=true`,
+which materializes source files with CRLF line endings in the working
+tree even when the index stores LF. The Dockerfile's `COPY . .` copies
+the working tree, not the index, so a Windows local Docker build will
+compile CRLF source while a Linux GitHub Actions checkout compiles LF
+source — for the same commit. The empirical investigation on 2026-05-28
+identified this as the cause of an initial cross-host hash divergence;
+see `fips/gate1_golden.md` Section 5 for the full diagnostic and
+resolution.
+
+The fix lives in `.gitattributes` (repo-wide `* text=auto eol=lf`, plus
+explicit `binary` markers for `.bin`/`.png`/`.so`/etc. fixtures so they
+are never EOL-converted). This is documented separately from the
+toolchain pin because its scope and mechanism are independent of the
+Rust toolchain itself, but the two together form the complete pinned
+environment required for cross-host bit-identical Rust output.
+
+---
+
+## 6. Non-Claims
 
 - This pin is a build-reproducibility configuration, not a security
   attestation. It does not constitute or substitute for FIPS 140-3
@@ -124,8 +147,9 @@ during the transition.
 
 ---
 
-## 6. Revision History
+## 7. Revision History
 
 | Version | Date | Change |
 |---|---|---|
 | 1.0.0 | 2026-05-28 | Initial pin documentation. Pin set to Rust 1.93.1, consolidating the Docker reproducibility lane with the existing `rust-toolchain.toml` and local development. Supersedes the prior 1.76.0 Docker pin. Concurrent with `gate1_golden.md` revision 2.0.0. |
+| 1.1.0 | 2026-05-28 | Added Section 5 documenting the related line-endings hygiene (`.gitattributes` with `eol=lf`), identified during the cross-host investigation on 2026-05-28 as a co-requirement for cross-host bit-identical Rust builds. The toolchain pin and the line-endings policy together form the complete pinned environment; see `fips/gate1_golden.md` Section 5 for the full diagnostic. |
