@@ -16,6 +16,13 @@ use std::panic;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(feature = "fips-integrity-hmac")]
+use hmac::{Hmac, Mac};
+#[cfg(feature = "fips-integrity-hmac")]
+use sha2::Sha256;
+#[cfg(feature = "fips-integrity-hmac")]
+use subtle::ConstantTimeEq;
+
 // ── FIPS software-integrity mode: exactly one must be selected ──────────────
 // fips-integrity-stub: development shim (STUB / NON-CONFORMANT), always passes.
 // fips-integrity-hmac: real HMAC-SHA-256 software integrity check (Path A').
@@ -749,20 +756,85 @@ fn run_mldsa44_kat() -> bool {
 // development. It MUST NOT be present in any Approved Mode artifact.
 // The compile_error! below enforces this at build time when the stub is absent.
 
-fn run_software_integrity_test() -> bool {
-    #[cfg(not(feature = "fips-integrity-stub"))]
-    {
-        compile_error!(
-            "Software integrity test not implemented. \
-             Enable the 'fips-integrity-stub' feature for development builds, \
-             or implement the HMAC-SHA-256 digest check before CST lab submission. \
-             See: fips/algorithm_inventory.md Section 4.1"
-        );
-    }
+#[cfg(feature = "fips-integrity-hmac")]
+type HmacSha256 = Hmac<Sha256>;
 
+// ── HMAC-SHA-256 CAST / helper functions ───────────────────────────────────
+//
+// RFC 4231 Test Case 1:
+//   key  = 0x0b repeated 20 times
+//   data = "Hi There"
+//   HMAC-SHA-256 =
+//     b0344c61d8db38535ca8afceaf0bf12b
+//     881dc200c9833da726e9376c2e32cff7
+//
+// This CAST validates the HMAC-SHA-256 primitive before it is used for the
+// software integrity check. The integrity key used by the module is non-secret;
+// no confidentiality claim is made for it.
+
+#[cfg(feature = "fips-integrity-hmac")]
+const HMAC_SHA256_CAST_KEY: [u8; 20] = [0x0b; 20];
+
+#[cfg(feature = "fips-integrity-hmac")]
+const HMAC_SHA256_CAST_MSG: &[u8] = b"Hi There";
+
+#[cfg(feature = "fips-integrity-hmac")]
+const HMAC_SHA256_CAST_TAG: [u8; 32] = [
+    0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53,
+    0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b, 0xf1, 0x2b,
+    0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7,
+    0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7,
+];
+
+#[cfg(feature = "fips-integrity-hmac")]
+fn compute_hmac_sha256(key: &[u8], msg: &[u8]) -> Option<[u8; 32]> {
+    let mut mac = HmacSha256::new_from_slice(key).ok()?;
+    mac.update(msg);
+
+    let bytes = mac.finalize().into_bytes();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&bytes);
+    Some(out)
+}
+
+#[cfg(feature = "fips-integrity-hmac")]
+fn constant_time_eq_32(a: &[u8; 32], b: &[u8; 32]) -> bool {
+    a.ct_eq(b).into()
+}
+
+#[cfg(feature = "fips-integrity-hmac")]
+fn run_hmac_sha256_cast() -> bool {
+    match compute_hmac_sha256(&HMAC_SHA256_CAST_KEY, HMAC_SHA256_CAST_MSG) {
+        Some(tag) => constant_time_eq_32(&tag, &HMAC_SHA256_CAST_TAG),
+        None => false,
+    }
+}
+
+fn run_software_integrity_test() -> bool {
     #[cfg(feature = "fips-integrity-stub")]
     {
-        true
+        // Development shim only. STUB / NON-CONFORMANT.
+        return true;
+    }
+
+    #[cfg(all(feature = "fips-integrity-hmac", not(feature = "fips-integrity-stub")))]
+    {
+        // Commit 2 only wires the HMAC primitive CAST and helper functions.
+        // The full Path A' software integrity check is implemented in the next
+        // commit. Until then, the real HMAC integrity lane must fail closed.
+        let _cast_ok = run_hmac_sha256_cast();
+        return false;
+    }
+
+    #[cfg(all(
+        not(feature = "fips-integrity-stub"),
+        not(feature = "fips-integrity-hmac")
+    ))]
+    {
+        // Unreachable in valid builds because the crate-root compile_error!
+        // above rejects this feature combination. This return exists only to
+        // keep type checking clean while the compile_error! is emitted.
+        return false;
     }
 }
 
@@ -1503,5 +1575,53 @@ mod tests {
         }
         println!("];");
         println!("=== END KAT VECTORS ===\n");
+    }
+
+        #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn hmac_sha256_cast_accepts_rfc4231_vector() {
+        assert!(
+            run_hmac_sha256_cast(),
+            "HMAC-SHA-256 CAST should accept the RFC 4231 test vector"
+        );
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn hmac_sha256_cast_rejects_wrong_tag() {
+        let computed = compute_hmac_sha256(&HMAC_SHA256_CAST_KEY, HMAC_SHA256_CAST_MSG)
+            .expect("HMAC computation should succeed");
+
+        let mut wrong = HMAC_SHA256_CAST_TAG;
+        wrong[0] ^= 0x01;
+
+        assert!(
+            constant_time_eq_32(&computed, &HMAC_SHA256_CAST_TAG),
+            "computed HMAC should match the RFC 4231 expected tag"
+        );
+
+        assert!(
+            !constant_time_eq_32(&computed, &wrong),
+            "computed HMAC must reject a one-bit-corrupted tag"
+        );
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn hmac_integrity_lane_fails_closed_until_file_check_is_implemented() {
+        let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        reset_module_state();
+
+        assert_eq!(
+            andna_init(),
+            AndnaErr::Internal,
+            "fips-integrity-hmac lane must fail closed until the full file integrity check is implemented"
+        );
+
+        assert_eq!(
+            MODULE_STATE.load(Ordering::Relaxed),
+            STATE_ERROR,
+            "MODULE_STATE should be ERROR after fail-closed HMAC integrity placeholder"
+        );
     }
 }
