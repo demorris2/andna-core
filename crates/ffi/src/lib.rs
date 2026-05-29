@@ -16,6 +16,23 @@ use std::panic;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// ── FIPS software-integrity mode: exactly one must be selected ──────────────
+// fips-integrity-stub: development shim (STUB / NON-CONFORMANT), always passes.
+// fips-integrity-hmac: real HMAC-SHA-256 software integrity check (Path A').
+// These are mutually exclusive and one must be present, enforced at build time.
+#[cfg(all(feature = "fips-integrity-stub", feature = "fips-integrity-hmac"))]
+compile_error!(
+    "Choose either 'fips-integrity-stub' or 'fips-integrity-hmac', not both."
+);
+#[cfg(all(
+    not(feature = "fips-integrity-stub"),
+    not(feature = "fips-integrity-hmac")
+))]
+compile_error!(
+    "Choose an integrity mode: 'fips-integrity-stub' (development) \
+     or 'fips-integrity-hmac' (real HMAC software integrity)."
+);
+
 // ── Module state machine ───────────────────────────────────────────────────
 //
 // The module must be initialized via `andna_init()` before any cryptographic
