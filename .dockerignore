@@ -1,8 +1,31 @@
+# Rust build outputs
 target/
+
+# Python noise
 **/__pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+python/.venv/
+.venv/
+
+# Generated proof / demo outputs
+evidence/
+hostb_out/
+verification_log*.json
+andna_audit.jsonl
+audit_validate.json
+sample_frame.bin
+tampered_frame.bin
+
+# Git / CI metadata not needed in Docker build context
 .git/
 .github/
+
+# Local/editor/package noise
 *.zip
 dist/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
