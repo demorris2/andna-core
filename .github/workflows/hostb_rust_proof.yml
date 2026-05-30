@@ -29,6 +29,9 @@ jobs:
         run: |
           docker build --progress=plain --target builder -t andna-r1:builder .
 
+      - name: Show Gate 1 artifact bundle hashes
+        run: docker run --rm --entrypoint cat andna-r1:builder /build/build-hashes.txt
+
       - name: Run Rust proof cycle inside Docker (Rust CLI only)
         run: |
           set -euo pipefail
@@ -43,8 +46,6 @@ jobs:
             -lc '
               set -euo pipefail
               cd /build
-
-              cargo build -p ffi-cli --release
 
               BIN="/build/target/release/andna"
               if [ ! -x "$BIN" ]; then
@@ -83,7 +84,7 @@ jobs:
               fi
 
               "$BIN" replay verification_log.json --frame sample_frame.bin
-              
+
               "$BIN" export evidence
 
               # ==========================================
@@ -94,18 +95,18 @@ jobs:
                 echo "ERROR: Gate 2 artifacts missing from export!"
                 exit 1
               fi
-              
+
               # Quote-safe check: just look for the word PASS
               if ! grep -q PASS evidence/audit_validate.json; then
                 echo "ERROR: Gate 2 validator rejected the clean chain!"
                 cat evidence/audit_validate.json
                 exit 1
               fi
-              echo "✓ Gate 1/T1 Baseline check passed."
+              echo "✓ Gate 2/T1 Baseline check passed."
 
               echo "Running Gate 2 T2 Tamper-Evidence Test..."
               cp andna_audit.jsonl tampered_audit.jsonl
-              
+
               # Quote-safe replacement using regex dot to match the quotes
               sed -i s/decision.:1/decision.:0/ tampered_audit.jsonl
 
@@ -126,8 +127,7 @@ jobs:
               # ==========================================
               echo "Running Gate 2 T3 Order Invariance Tests..."
 
-              # T3.1: Record Reordering (Swap line 1 and 2)
-              # Proves the validator rejects out-of-order sequences and broken prev_hash links
+              # T3.1: Record Reordering
               tail -n 1 good_audit.jsonl > andna_audit.jsonl
               head -n 1 good_audit.jsonl >> andna_audit.jsonl
               "$BIN" export evidence_t3_swap || true
@@ -139,7 +139,6 @@ jobs:
               fi
 
               # T3.2: Record Duplication
-              # Proves the validator rejects duplicated sequence numbers and duplicated record_hashes
               cat good_audit.jsonl > andna_audit.jsonl
               tail -n 1 good_audit.jsonl >> andna_audit.jsonl
               "$BIN" export evidence_t3_dup || true
@@ -150,8 +149,7 @@ jobs:
                 echo "✓ T3.2 PASSED: Validator caught duplicated records."
               fi
 
-              # T3.3: Record Deletion (Missing genesis record)
-              # Proves the validator rejects sequence gaps and enforces the 0-based genesis rule
+              # T3.3: Record Deletion
               tail -n 1 good_audit.jsonl > andna_audit.jsonl
               "$BIN" export evidence_t3_del || true
               if grep -q PASS evidence_t3_del/audit_validate.json; then

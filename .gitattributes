@@ -1,0 +1,37 @@
+# AN-DNA line-ending policy — enforce LF repo-wide for cross-platform build
+# reproducibility. Without this, Windows checkouts with core.autocrlf=true can
+# carry CRLF into the local Docker build context while Linux CI checkouts use LF.
+
+# Default: auto-detect text vs binary; for detected text, store and check out
+# as LF on every platform.
+* text=auto eol=lf
+
+# Explicit text types.
+*.rs     text eol=lf
+*.toml   text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.sh     text eol=lf
+*.h      text eol=lf
+*.c      text eol=lf
+*.py     text eol=lf
+*.ps1    text eol=lf
+*.lock   text eol=lf
+
+# Binary types — never apply text/eol conversion.
+*.bin    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.pdf    binary
+*.zip    binary
+*.so     binary
+*.a      binary
+*.dll    binary
+*.dylib  binary
+*.docx   binary
+*.xlsx   binary
+*.pptx   binary

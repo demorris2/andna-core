@@ -4,3 +4,5 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+hmac = "0.12"
+sha2 = "0.10"

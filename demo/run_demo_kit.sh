@@ -9,6 +9,8 @@ echo "== AN-DNA R1 Demo Kit =="
 echo "BIN: $BIN"
 echo "FIXTURE: $FIXTURE"
 
+rm -f verification_log.json andna_audit.jsonl audit_validate.json tampered_frame.bin
+rm -rf evidence hostb_out
 rm -rf "$OUTDIR" tampered_frame.bin || true
 
 echo "\n[1/5] Verify fixture"

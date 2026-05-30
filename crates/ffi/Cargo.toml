@@ -10,12 +10,17 @@ crate-type = ["lib", "staticlib", "cdylib"]
 default = ["oqs-backend"]
 oqs-backend = ["andna-core/oqs-backend"]
 stub = ["andna-core/stub"]
-
+fips-integrity-stub = []
+fips-integrity-hmac = ["dep:hmac", "dep:sha2", "dep:subtle"]
+fips-kat-vectors-embedded = []
 [dependencies]
 andna-contracts = { workspace = true }
 andna-core      = { workspace = true, default-features = false }
 andna-codec     = { workspace = true }
+andna-transcript = { path = "../transcript" }
 andna-audit = { path = "../audit", features = ["oqs-backend"], default-features = false }
 oqs = "0.10"
 sha3 = "0.10"
-
+hmac = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
+subtle = { workspace = true, optional = true }

@@ -1,6 +1,6 @@
 # =============================================================================
 # AN-DNA vNext Phase 1 — Deterministic Docker Build
-# Gate 1 acceptance: identical output across any Linux host.
+# Gate 1 acceptance: identical artifact-bundle output across Linux hosts.
 # =============================================================================
 
 # 1. PINNED BASE IMAGE (Builder Stage)
@@ -17,10 +17,22 @@ ENV CFLAGS="-ffile-prefix-map=/tmp/liboqs=. -ffile-prefix-map=/build=."
 ENV CXXFLAGS="-ffile-prefix-map=/tmp/liboqs=. -ffile-prefix-map=/build=."
 
 # ── Pin versions ──
-ARG RUST_VERSION=1.76.0
+ARG RUST_VERSION=1.93.1
 ARG LIBOQS_VERSION=0.10.1
 
-# ── System build dependencies (Fixed: Added libclang/llvm for bindgen) ──
+# ── FIPS feature sets ──
+# Development lane:
+#   fips-integrity-stub is STUB / NON-CONFORMANT and exists only to keep
+#   fast local/dev unit tests working.
+#
+# HMAC lane:
+#   fips-integrity-hmac is the real Path A' software-integrity path.
+#   It verifies libandna_ffi.so against an associated ANDNA-INTEGRITY-v1
+#   reference file.
+ARG FIPS_FEATURES_DEV="oqs-backend fips-integrity-stub fips-kat-vectors-embedded"
+ARG FIPS_FEATURES_HMAC="oqs-backend fips-integrity-hmac fips-kat-vectors-embedded"
+
+# ── System build dependencies ──
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
@@ -60,15 +72,58 @@ RUN git clone --depth 1 --branch ${LIBOQS_VERSION} \
 WORKDIR /build
 COPY . .
 
-# Force bindgen to find the installed libclang
+# Force bindgen to find the installed libclang.
+# This path reflects the pinned base image / installed LLVM package set.
 ENV LIBCLANG_PATH=/usr/lib/llvm-14/lib
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
-RUN cargo build --release --all 2>&1 && \
-    cargo test --all 2>&1
+# Force Rustup to use the pinned Docker lane toolchain even if rust-toolchain.toml
+# exists in the repository.
+ENV RUSTUP_TOOLCHAIN=${RUST_VERSION}
 
-# ── Record build metadata ──
-RUN sha256sum target/release/libandna_ffi.so > /build/build-hashes.txt
+# ── Build and validate Path A' HMAC software-integrity lane ──
+#
+# Gate 1 now covers an artifact bundle:
+#   1. target/release/libandna_ffi.so
+#   2. target/release/libandna_ffi.integrity
+#
+# The integrity reference is generated from the release .so and then verified by
+# loading the release shared object through the ctypes smoke test. The smoke test
+# confirms:
+#   - valid module/reference pair passes
+#   - missing env paths fail closed
+#   - tampered module bytes fail closed
+#   - tampered reference fails closed
+RUN cargo build -p xtask 2>&1 && \
+    cargo build -p andna-ffi --release --features "${FIPS_FEATURES_HMAC}" 2>&1 && \
+    cargo run -p xtask -- write-integrity-reference \
+        target/release/libandna_ffi.so \
+        target/release/libandna_ffi.integrity 2>&1 && \
+    python3 scripts/smoke_hmac_integrity.py \
+        target/release/libandna_ffi.so \
+        target/release/libandna_ffi.integrity 2>&1
+
+# ── Build Rust CLI and run crate tests ──
+#
+# The Rust CLI proof path is intentionally kept on the development feature set.
+# The HMAC software-integrity lane is validated above against the release .so.
+# Gate 2 deterministic verification evidence is independent of the FFI module
+# software-integrity reference mechanism.
+RUN cargo build -p ffi-cli --release --features "${FIPS_FEATURES_DEV}" 2>&1 && \
+    cargo test  -p andna-ffi          --features "${FIPS_FEATURES_DEV}" 2>&1 && \
+    cargo test  -p andna-ffi          --features "${FIPS_FEATURES_HMAC}" software_integrity -- --nocapture 2>&1 && \
+    cargo test  -p andna-ffi          --features "${FIPS_FEATURES_HMAC}" hmac_integrity_lane -- --nocapture 2>&1 && \
+    cargo test  -p andna-ffi          --features "${FIPS_FEATURES_HMAC}" hmac_sha256 -- --nocapture 2>&1 && \
+    cargo test  -p andna-audit                                       2>&1 && \
+    cargo test  -p andna-core         --features "oqs-backend"       2>&1 && \
+    cargo test  -p andna-mldsa44      --features "oqs-backend"       2>&1 && \
+    cargo test  -p andna-transcript                                  2>&1 && \
+    cargo test  -p andna-codec                                       2>&1 && \
+    cargo test  -p andna-contracts                                   2>&1
+
+# ── Record Gate 1 artifact-bundle metadata ──
+RUN sha256sum target/release/libandna_ffi.so > /build/build-hashes.txt && \
+    sha256sum target/release/libandna_ffi.integrity >> /build/build-hashes.txt
 
 # =============================================================================
 # Runtime stage — slim image for CLI execution
@@ -87,6 +142,7 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
 # Copy artifacts from builder
 COPY --from=builder /usr/local/lib/liboqs* /usr/local/lib/
 COPY --from=builder /build/target/release/libandna_ffi.so /usr/local/lib/
+COPY --from=builder /build/target/release/libandna_ffi.integrity /usr/local/lib/
 RUN ldconfig
 
 COPY --from=builder /build/python /opt/andna/python
@@ -100,6 +156,13 @@ ENV VERIFY_ENGINE=rust
 ENV ANDNA_LIB_PATH=/usr/local/lib/libandna_ffi.so
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
+# Path A' HMAC software-integrity configuration.
+# These paths are trusted deployment configuration for the associated integrity
+# reference bundle.
+ENV ANDNA_INTEGRITY_MODULE_PATH=/usr/local/lib/libandna_ffi.so
+ENV ANDNA_INTEGRITY_REF_PATH=/usr/local/lib/libandna_ffi.integrity
+
 WORKDIR /workspace
+
 # This entrypoint will run the full test suite inside the container
 ENTRYPOINT ["python3", "-m", "pytest", "-v"]

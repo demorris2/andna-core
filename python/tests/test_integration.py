@@ -265,11 +265,15 @@ class TestDifferentialPipeline(unittest.TestCase):
             os.environ["VERIFY_ENGINE"] = "python"
             reset_engine()
 
+    def setUp(self):
+        # Per-test guard: skip cleanly if Rust engine wasn't loadable.
+        # This protects tests that import from andna.native at method scope
+        # (which would otherwise trigger an unguarded DLL load failure).
+        if not self.rust_available:
+            self.skipTest("Rust engine not available (libandna_ffi not built)")
+
     def _run_both(self, frame_bytes):
         """Run frame through both engines, return (py_resp, rs_resp)."""
-        if not self.rust_available:
-            self.skipTest("Rust engine not available")
-
         os.environ["VERIFY_ENGINE"] = "python"
         reset_engine()
         py_resp = handle_verify_request(frame_bytes)

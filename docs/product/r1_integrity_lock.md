@@ -9,3 +9,15 @@ If any byte changes in the authoritative audit chain or exported evidence artifa
 # Boundary Statement (LOCKED)
 
 These claims apply **within the pinned verification lane** and for the artifact classes demonstrated in the Proof Pack (fixture frame, evidence bundle, and authoritative audit chain).
+
+# Gate 2 T3 (LOCKED): Order Invariance Under Record Permutation
+
+**R1 Rule:** The authoritative chain is order-sensitive. Any permutation, duplication, deletion, or seq-gap must FAIL validation.
+
+## Acceptance checks
+1) Swap two lines → FAIL
+2) Duplicate a line → FAIL
+3) Delete a line → FAIL
+4) Edit seq to create a gap (e.g., 0,2) → FAIL
+
+**R1 recommendation:** FAIL on any permutation. This preserves “single writer owns order” semantics and keeps audit review simple.

@@ -7,6 +7,8 @@ edition.workspace = true
 default = ["oqs-backend"]
 oqs-backend = ["andna-ffi/oqs-backend"]
 stub = ["andna-ffi/stub"]
+fips-integrity-stub = ["andna-ffi/fips-integrity-stub"]
+fips-kat-vectors-embedded = ["andna-ffi/fips-kat-vectors-embedded"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

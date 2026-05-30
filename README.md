@@ -16,7 +16,7 @@ andna-core/
     ffi/               # C ABI shim (only unsafe lives here)
   contracts_codegen/   # Generates include/andna_vnext_contracts.h
   ffi_cli/             # CLI smoke test tool for FFI
-  xtask/               # Header regeneration + drift detection
+  xtask/               # Header regeneration, drift detection, integrity reference generator
   include/
     andna_vnext_contracts.h  # Generated C constants with _Static_assert guards
     andna_core.h             # C ABI header (cbindgen-generated)
@@ -26,10 +26,12 @@ andna-core/
       native.py              # ctypes FFI bindings to libandna_ffi.so
       engine.py              # VERIFY_ENGINE feature flag router
       frame_packer.py        # mu_pre builder, frame pack/unpack
-    tests/                   # 46 Python tests
+    tests/                   # Python test suite
   tests/
-    generate_transcript_kats.py  # KAT vector generator
-    generate_acvp_vectors.py     # ACVP sigVer vector generator (requires liboqs-python)
+    generate_transcript_kats.py  # SHAKE256 KAT vector generator
+    download_nist_acvp.py        # Fetches + filters NIST ACVP external/pure sigVer vectors
+    extract_kat_for_ffi.py       # Bridges a vendored ACVP vector into the embedded FFI KAT
+    apply_acvp_kat_to_ffi.py     # Applies the extracted KAT to the FFI constants
 ```
 
 ## Hard Contracts (Non-Negotiable)
@@ -53,6 +55,18 @@ andna-ffi → andna-core → andna-mldsa44
 oqs-backend  oqs-backend   oqs-backend (default: real ML-DSA-44 via liboqs)
 stub         stub           stub        (always-pass for CI bootstrap)
 ```
+
+The `andna-ffi` crate additionally has two mutually-exclusive software-integrity
+modes (a crate-root `compile_error!` enforces that exactly one is selected):
+
+```
+fips-integrity-stub   development only — always-pass integrity shim
+fips-integrity-hmac   real HMAC-SHA-256 full-file integrity check (Path A′)
+```
+
+The FIPS / release lane uses `fips-integrity-hmac`. See `fips/algorithm_inventory.md`
+Section 4.4 for the integrity mechanism and `fips/security_policy_draft.md` for the
+trust-boundary scope.
 
 ```bash
 # Build with real ML-DSA-44 (requires liboqs installed)
@@ -91,6 +105,12 @@ cargo test -p andna-core --no-default-features --features stub
 
 # Build release (produces libandna_ffi.a + libandna_ffi.so)
 LD_LIBRARY_PATH=/usr/local/lib cargo build --release -p andna-ffi
+
+# Generate the HMAC integrity reference (FIPS release lane)
+cargo build -p andna-ffi --release --features "oqs-backend fips-integrity-hmac fips-kat-vectors-embedded"
+cargo run -p xtask -- write-integrity-reference \
+  target/release/libandna_ffi.so \
+  target/release/libandna_ffi.integrity
 
 # FFI smoke test
 LD_LIBRARY_PATH=/usr/local/lib cargo run -p ffi-cli -- smoke
@@ -147,45 +167,108 @@ Switch backend: `VERIFY_ENGINE=rust` + `ANDNA_LIB_PATH=/path/to/libandna_ffi.so`
 
 ## Crate Status
 
-| Crate       | Status           | Notes                                     |
-|-------------|------------------|-------------------------------------------|
-| contracts   | ✅ Complete      | Single source of truth, 25 compile-time asserts |
-| codec       | ✅ Complete      | Zero-alloc frame parsing                  |
-| transcript  | ✅ Complete      | Real SHAKE256, constant-time comparison   |
-| mldsa44     | ✅ Complete      | liboqs backend (default), stub fallback   |
-| core        | ✅ Complete      | Orchestrator: parse → pk_hash → μ → verify |
-| ffi         | ✅ Complete      | 5 C ABI functions, 8 error codes          |
-| Python      | ✅ Complete      | ctypes bindings, engine router, frame packer |
+| Crate       | Status      | Notes                                                        |
+|-------------|-------------|--------------------------------------------------------------|
+| contracts   | ✅ Complete | Single source of truth, compile-time assertions              |
+| codec       | ✅ Complete | Zero-alloc frame parsing                                     |
+| transcript  | ✅ Complete | Real SHAKE256, constant-time comparison                      |
+| mldsa44     | ✅ Complete | liboqs backend (default), stub fallback, vendored NIST ACVP KAT |
+| core        | ✅ Complete | Orchestrator: parse → pk_hash → μ → verify                   |
+| ffi         | ✅ Complete | 8 C ABI functions, 10 error codes, HMAC software integrity (Path A′) |
+| Python      | ✅ Complete | ctypes bindings, engine router, frame packer                 |
+
+## Self-Test Sequence
+
+`andna_init()` runs the power-up self-test sequence in a locked order before the
+module enters Approved Mode:
+
+```
+HMAC-SHA-256 CAST → SHAKE256 KAT → ML-DSA-44 KAT → software integrity check
+```
+
+Any failure transitions the module to a sticky Error State; all FFI calls then
+return `Internal` until the module is reloaded. See `fips/algorithm_inventory.md`
+Section 4 for the full self-test specification.
 
 ## Test Inventory
 
-**Rust** (35+ tests):
-- contracts: 4 (compile-time assertions + runtime)
-- codec: 6 (frame pack/unpack, mu_pre parse)
-- transcript: 11 (pk_hash, μ derivation, 3 KATs)
-- mldsa44: 4 unit + 5 liboqs roundtrip + 6 ACVP self-gen
-- core: 4 (verify pipeline, frame roundtrip)
-- ffi: 5 (null/length rejection, strerror, version)
+**Rust:**
+- contracts: compile-time assertions + runtime checks
+- codec: frame pack/unpack, mu_pre parse
+- transcript: pk_hash, μ derivation, 3 SHAKE256 KATs
+- mldsa44: unit + liboqs roundtrip + vendored NIST ACVP external/pure sigVer harness (10/10)
+- core: verify pipeline, frame roundtrip
+- ffi: null/length rejection, strerror, version, andna_init self-test gate, HMAC integrity (CAST, reference parsing, full-file verify, tamper rejection)
 
-**Python** (46 tests):
-- test_contracts: 12 (locked values, domain separator, error names)
-- test_frame_packer: 12 (3 KATs, roundtrip, epoch encoding, validation)
-- test_engine: 12 (Python engine, Rust engine, differential)
-- test_native: 10 (ctypes FFI direct calls)
-- test_integration: end-to-end HTTP→verify pipeline
+**Python:**
+- test_contracts: locked values, domain separator, error names
+- test_frame_packer: SHAKE256 KATs, roundtrip, epoch encoding, validation
+- test_engine: Python engine, Rust engine, differential
+- test_native: ctypes FFI direct calls
+- test_integration: end-to-end HTTP → verify pipeline
+
+> Python tooling is **outside the FIPS cryptographic module boundary** and is
+> non-authoritative. Cross-language parity checks are informational only.
 
 ## ACVP Vectors
 
-The `crates/mldsa44/tests/acvp_sigver.rs` harness supports two modes:
+The ML-DSA-44 power-up KAT uses the **vendored official NIST ACVP-Server FIPS 204
+sigVer vectors** (external interface, preHash=pure), stored in
+`crates/mldsa44/tests/vectors/acvp_mldsa44_sigver.json` with a SHA-256 manifest and
+provenance in `crates/mldsa44/tests/vectors/README.md`. The embedded `andna_init()`
+KAT uses tcId 11 (expected-valid case); the full harness
+(`crates/mldsa44/tests/acvp_sigver.rs`) runs the complete vendored set and passes 10/10.
 
-1. **Self-generated** (always active with oqs-backend): keygen → sign → verify roundtrip,
-   tampered signature rejection, cross-key rejection, pipeline interface test.
+Tooling: `tests/download_nist_acvp.py` fetches and filters the external/pure vectors;
+`tests/extract_kat_for_ffi.py` and `tests/apply_acvp_kat_to_ffi.py` bridge the vendored
+vector into the embedded FFI KAT.
 
-2. **Vendored NIST vectors** (optional): place vectors in
-   `crates/mldsa44/tests/vectors/acvp_mldsa44_sigver.json`.
-   Generate with `python tests/generate_acvp_vectors.py` (requires liboqs-python).
+This vendored NIST vector is the authoritative power-up KAT. It is distinct from a
+CST-lab ACVP test session, which is required for CAVP certificate issuance and has not
+yet been performed — see `fips/algorithm_inventory.md` Section 6.
+
+## Audit Logging (Gate 2)
+
+**Authoritative vs. convenience logs.** The AN-DNA CLI produces two output files:
+
+- **`andna_audit.jsonl` (authoritative).** The procurement-grade, tamper-evident
+  Gate 2 artifact: strictly monotonic sequence, a single numeric `audit_run_id` per
+  session, and a sha3-256 hash chain. Evaluators and auditors must use this file for
+  all integrity claims.
+- **`verification_log.json` (non-authoritative).** A convenience file for replay UX.
+  String-based run IDs, no cryptographic ordering. Not for compliance validation.
+
+**Sequence convention.** The authoritative chain enforces a 0-based index. The genesis
+record of each session begins at `seq: 0` with a `prev_hash` of 64 zero bytes.
+
+The Gate 2 `verification_digest` (`85f4dc18...`) anchors deterministic verification
+output across hosts; see `fips/gate1_golden.md` Section 8. The `andna-audit` crate
+(which produces the chain) uses SHA3-256 and is outside the FIPS cryptographic module
+boundary.
+
+## Build Reproducibility (Gate 1)
+
+The release lane produces a cross-host bit-identical two-artifact bundle
+(`libandna_ffi.so` + `libandna_ffi.integrity`) under a pinned Docker environment
+(Rust 1.93.1, liboqs 0.10.1, LF-normalized sources). The bundle reproduces byte-for-byte
+on local Docker and GitHub Actions HostB. See `fips/gate1_golden.md` for current hashes,
+the pinned environment, and the cross-host evidence.
 
 ## Migration Path
 
-**R1** (current): Core library + Python FFI integration + real ML-DSA-44 + ACVP gate
-**R2** (next): Rust verifier service (Axum + Redis) + canary deployment + benchmarks
+**R1** (current): Core library + Python FFI integration + real ML-DSA-44 + vendored
+NIST ACVP KAT + HMAC-SHA-256 software integrity (Path A′) + cross-host reproducible
+build. Engineering-complete; the remaining gate is a CST-lab ACVP session for CAVP
+certificates.
+
+**R2** (next): Rust verifier service (Axum + Redis) + canary deployment + benchmarks.
+
+## Status and Non-Claims
+
+This repository is pre-validation engineering. It does **not** claim FIPS 140-3
+validation or CAVP certification; those require a test session through an accredited
+CST laboratory under a CMVP contract. The HMAC-SHA-256 software-integrity key is
+non-secret by design and detects unauthorized or accidental modification under the
+approved build/deployment process — it is not a defense against a fully privileged
+adversary who can rewrite both the module and its reference file. See the `fips/`
+package for the complete claims, self-test specifications, and scope limitations.

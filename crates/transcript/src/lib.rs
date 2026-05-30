@@ -129,6 +129,99 @@ pub fn check_device_id_duality(
         Err(TranscriptError::DeviceIdMismatch)
     }
 }
+/// Run the SHAKE256 Known Answer Test (power-up self-test).
+///
+/// Checks three fixed-input / fixed-output vectors byte-for-byte against
+/// the Python hashlib.shake_256 reference values embedded in this crate.
+/// Returns true only if all three pass. Called from `andna_init()`.
+///
+/// Input construction mirrors the Python reference test vectors exactly:
+///   KAT-T0: SHAKE256(zeros(TE_LEN), 64)
+///   KAT-T1: SHAKE256(structured_te, 64)  — rho=0x01–0x20, t1=0xAA×1280,
+///                                           epoch=5 LE, id16=0xBB×16
+///   KAT-T2: SHAKE256(structured_mu_pre, 64) — pk_hash from T1,
+///                                              ANDNAAUTH, version=0x01,
+///                                              device_id32=0xCC×32,
+///                                              epoch=5 LE, sid=0xDD×32,
+///                                              N_d=0xEE×16, N_s=0xFF×16,
+///                                              ctx_hash=0x11×32,
+///                                              policy_hash=0x00×32
+pub fn run_shake256_kat() -> bool {
+    // KAT-T0: pk_hash = SHAKE256(zeros(TE_LEN), 64)
+    const KAT_T0: [u8; PK_HASH_LEN] = [
+        0x0f, 0x32, 0xd8, 0xb3, 0x56, 0x85, 0x27, 0x04, 0x9e, 0x8d, 0x40, 0xf3, 0xca, 0x7a, 0xa2,
+        0xc9, 0x24, 0xe3, 0x5d, 0xdd, 0x64, 0x98, 0xe5, 0x84, 0xf1, 0xd9, 0xec, 0x34, 0x39, 0x4f,
+        0x3b, 0xc4, 0x2e, 0x32, 0x22, 0x67, 0x5c, 0xc3, 0x63, 0xe0, 0x63, 0x78, 0x9d, 0xaa, 0x9e,
+        0xf6, 0x1a, 0x89, 0x94, 0x82, 0xc3, 0x9c, 0xad, 0xa2, 0x14, 0xd9, 0x84, 0xfd, 0x94, 0xbe,
+        0x5b, 0xb4, 0xb5, 0x29,
+    ];
+
+    // KAT-T1: pk_hash = SHAKE256(structured_te, 64)
+    // T_E: rho = 0x01..=0x20, t1 = 0xAA × 1280, epoch = 5 LE, id16 = 0xBB × 16
+    const KAT_T1: [u8; PK_HASH_LEN] = [
+        0xf4, 0x33, 0x80, 0x86, 0xd8, 0xc1, 0x14, 0x8d, 0xaa, 0x60, 0x8e, 0xd1, 0x72, 0x8e, 0x63,
+        0xe7, 0x0f, 0x87, 0xc0, 0xe6, 0xdf, 0x1c, 0x1a, 0x17, 0xaf, 0xa5, 0x6c, 0xb4, 0x2c, 0x56,
+        0x36, 0x5d, 0xdb, 0xad, 0x5c, 0xc2, 0x4d, 0x39, 0xbb, 0x64, 0x30, 0xae, 0x16, 0x77, 0xbe,
+        0xe3, 0x63, 0x7a, 0xcc, 0x88, 0x6f, 0xd2, 0xe0, 0x87, 0xd8, 0xe2, 0x8f, 0x16, 0x0c, 0xe0,
+        0xb6, 0x4a, 0xc8, 0x74,
+    ];
+
+    // KAT-T2: mu = SHAKE256(structured_mu_pre, 64)
+    // mu_pre built from T1 pk_hash + full field layout (see comment above)
+    const KAT_T2: [u8; PK_HASH_LEN] = [
+        0xa5, 0x08, 0xef, 0xbf, 0x68, 0x0d, 0x8c, 0x7f, 0x32, 0x88, 0x00, 0x43, 0x4e, 0x09, 0xe7,
+        0x38, 0x60, 0x7f, 0x4a, 0xfc, 0x2b, 0xde, 0x2e, 0xc8, 0x03, 0x5d, 0x09, 0x2d, 0xdb, 0xab,
+        0x0d, 0xb0, 0xcb, 0x5c, 0xba, 0xac, 0x71, 0x6a, 0xc2, 0x80, 0x38, 0xf2, 0xec, 0xa2, 0xb7,
+        0xe1, 0x96, 0x50, 0xaf, 0x2d, 0x1c, 0xe1, 0xa1, 0xb8, 0x9c, 0xa9, 0x59, 0xcd, 0x1c, 0x5a,
+        0xfe, 0xbb, 0x21, 0x3a,
+    ];
+
+    let mut out = [0u8; PK_HASH_LEN];
+
+    // ── T0: all-zeros T_E ─────────────────────────────────────────────────
+    let t0_input = [0u8; TE_LEN];
+    pk_hash_from_te(&t0_input, &mut out);
+    if out != KAT_T0 { return false; }
+
+    // ── T1: structured T_E — must match build_kat_t1_te() in tests ────────
+    let mut t1_input = [0u8; TE_LEN];
+    // rho = 0x01..=0x20 (32 bytes at TE_RHO_OFF)
+    for i in 0..32 {
+        t1_input[TE_RHO_OFF + i] = (i + 1) as u8;
+    }
+    // t1 = 0xAA × 1280 (at TE_T1_OFF)
+    t1_input[TE_T1_OFF..TE_T1_OFF + TE_T1_LEN].fill(0xAA);
+    // epoch = 5 LE
+    t1_input[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN]
+        .copy_from_slice(&5u64.to_le_bytes());
+    // device_id16 = 0xBB × 16
+    t1_input[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN].fill(0xBB);
+    pk_hash_from_te(&t1_input, &mut out);
+    if out != KAT_T1 { return false; }
+
+    // ── T2: structured mu_pre — must match build_kat_t2_mu_pre() in tests ─
+    // pk_hash field comes from T1 result (captured in `out` above).
+    let t1_pk_hash = out;
+    let mut t2_input = [0u8; MU_PRE_LEN];
+    t2_input[MU_PRE_PK_HASH_OFF..MU_PRE_PK_HASH_OFF + PK_HASH_LEN]
+        .copy_from_slice(&t1_pk_hash);
+    t2_input[MU_PRE_DOMAIN_SEP_OFF..MU_PRE_DOMAIN_SEP_OFF + DOMAIN_SEP_LEN]
+        .copy_from_slice(&DOMAIN_SEP);
+    t2_input[MU_PRE_VERSION_OFF] = MU_PRE_VERSION_VAL;
+    t2_input[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN]
+        .fill(0xCC);
+    t2_input[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + MU_PRE_EPOCH_LEN]
+        .copy_from_slice(&5u64.to_le_bytes());
+    t2_input[MU_PRE_SID_OFF..MU_PRE_SID_OFF + MU_PRE_SID_LEN].fill(0xDD);
+    t2_input[MU_PRE_ND_OFF..MU_PRE_ND_OFF + MU_PRE_ND_LEN].fill(0xEE);
+    t2_input[MU_PRE_NS_OFF..MU_PRE_NS_OFF + MU_PRE_NS_LEN].fill(0xFF);
+    t2_input[MU_PRE_CTX_HASH_OFF..MU_PRE_CTX_HASH_OFF + MU_PRE_CTX_HASH_LEN].fill(0x11);
+    // policy_hash = 0x00 (already zero from initialization)
+    mu_from_mu_pre(&t2_input, &mut out);
+    if out != KAT_T2 { return false; }
+
+    true
+}
 
 #[cfg(test)]
 mod tests {

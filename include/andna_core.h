@@ -3,6 +3,12 @@
  *
  * Regenerate: cargo run -p xtask -- gen-headers
  * Source: crates/ffi/src/lib.rs
+ *
+ * NOTE:
+ * This local copy was manually patched to expose andna_init() because
+ * local header generation was blocked by Windows Application Control
+ * / missing cbindgen in the temporary Docker header-generation path.
+ * Re-run xtask/cbindgen in CI or an approved build lane when available.
  * ================================================================ */
 
 #ifndef ANDNA_CORE_H
@@ -12,7 +18,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <stddef.h>
 #include "andna_vnext_contracts.h"
 
@@ -44,6 +49,16 @@ typedef enum AndnaErr {
    */
   ANDNA_ERR_INTERNAL = 100,
 } AndnaErr;
+
+/**
+ * Initialize the AN-DNA FIPS module.
+ *
+ * Must be called before any cryptographic service.
+ * Runs power-up self-tests and transitions the module to Approved Mode.
+ *
+ * Returns ANDNA_ERR_OK on success, ANDNA_ERR_INTERNAL on failure.
+ */
+enum AndnaErr andna_init(void);
 
 /**
  * Verify mu_pre + T_E + signature.
