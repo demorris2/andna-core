@@ -87,7 +87,7 @@ and carry no FIPS security claim:
 - Demo scripts and integration tooling
 - AuditSink / Replay Engine (deterministic logging infrastructure)
 - The `stub` feature of `andna-mldsa44` (CI bootstrap shim — non-approved)
-- The `fips-integrity-stub` feature of `andna-ffi` **(STUB / NON-CONFORMANT)** — placeholder software integrity shim; carries no FIPS security claim
+- The `fips-integrity-stub` feature of `andna-ffi` — development-only software-integrity shim that always passes. Mutually exclusive with `fips-integrity-hmac` (enforced by crate-root `compile_error!` gates). Prohibited in any Approved Mode artifact.
 
 > **Python Boundary Note:** Python tooling is **outside the FIPS cryptographic module boundary**. It is non-authoritative and does not provide Approved Mode cryptographic services. The Python layer calls the module via ctypes FFI but is not compiled into it.
 
@@ -320,7 +320,7 @@ before any cryptographic output is produced.
 | **Vectors** | Official NIST ACVP-Server FIPS 204 sigVer vectors (external interface, preHash=pure), vendored under `crates/mldsa44/tests/vectors/`. Power-up KAT uses tcId 11 (expected-valid case). Harness passes 10/10. |
 | **Pass condition** | Valid signature: ACCEPT. Corrupted signature (one bit flipped): REJECT. |
 | **Failure action** | Module enters Error State; all FFI functions return error code |
-| **Implementation status** | **Wired into `andna_init()` power-up self-test path on `fips/package-v1`. Passes in `cargo test -p andna-ffi` with FIPS features (12/12).** Remaining P0 blocker: replace self-generated vectors with NIST ACVP sigVer vectors. |
+| **Implementation status** | **Implemented.** Vendored official NIST ACVP-Server external/pure sigVer vectors are wired into `andna_init()`. The full vendored set passes 10/10; FFI test suite passes with FIPS features. |
 
 #### 7.1.3 SHAKE256 Known Answer Test (KAT)
 
@@ -490,10 +490,12 @@ This document and the associated FIPS package do not claim:
   draft. Validation requires testing by an accredited Cryptographic
   and Security Testing (CST) laboratory under a CMVP contract.
 
-- **CAVP certification** for ML-DSA-44 or SHAKE256. ACVP testing
-  through the CST lab is required before any CAVP certificate can
-  be issued. NIST-issued ACVP test vectors must be substituted for
-  the current self-generated vectors.
+- - **CAVP certification** for ML-DSA-44, SHAKE256, or HMAC-SHA-256.
+  ACVP testing through an accredited CST laboratory is required
+  before any CAVP certificate can be issued. The module's power-up
+  ML-DSA-44 KAT already uses vendored NIST ACVP-Server external/pure
+  sigVer vectors (tcId 11), but vendoring public reference vectors is
+  distinct from completing an ACVP test session through the lab.
 
 - **Independent FIPS validation of `liboqs`.** The `liboqs` 0.10.1
   library is not independently FIPS-validated. The FIPS validation
@@ -565,7 +567,7 @@ This document and the associated FIPS package do not claim:
 | NIST SP 800-140B Rev. 1 | CMVP Security Policy Requirements: FIPS 140-3 Level 1-3 |
 | NIST SP 800-140C | CMVP Approved Security Functions |
 | NIST SP 800-218 | Secure Software Development Framework (SSDF) |
-| gate1_hostB_report.json | AN-DNA Gate 1 Cross-Platform Build Verification Report (2026-03-03) |
+| gate1_hostB_report.json | AN-DNA Gate 1 Cross-Platform Build Verification Report (2026-03-03) ||
 | /fips/module_boundary.md | AN-DNA Module Boundary Definition v1.0.0 |
 | /fips/build_manifest.json | AN-DNA Build Manifest v1.0.0 |
 | /fips/operational_environments.md | AN-DNA Operational Environments v1.0.0 |
