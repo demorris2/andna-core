@@ -97,8 +97,9 @@ The module operates in **Approved Mode** when and only when:
 
 1. The artifact is compiled with the `oqs-backend` feature flag. The
    `stub` feature must be absent.
-2. The SHA-256 digest of `libandna_ffi.so` matches the validated
-   Golden Hash (see Section 8.2).
+2. The two-artifact Gate 1 bundle (`libandna_ffi.so` and the associated
+   `libandna_ffi.integrity` reference file) matches the recorded values
+   in `fips/gate1_golden.md` Section 2.
 3. The module is loaded in a defined Operational Environment
    (see Section 5).
 4. All power-up self-tests complete successfully before any output
@@ -125,7 +126,7 @@ All functions return `AndnaErr` (a C-compatible `#[repr(C)]` enum with ABI-stabl
 
 | Function | Signature | FIPS Service | Description |
 |---|---|---|---|
-| `andna_init` | `() -> AndnaErr` | Module Initialization | **Required first call.** Implemented on `fips/package-v1`; gates all cryptographic entry points through the Rust module state machine. SHAKE256 transcript KAT and ML-DSA-44 KAT are wired into the power-up self-test path. Software integrity check is stubbed via `fips-integrity-stub` **(STUB / NON-CONFORMANT — P0 blocker for CST lab submission)**. Returns `Ok` on success; `Internal` on self-test failure. No cryptographic function may be called before `andna_init` returns `Ok`. |
+| `andna_init` | `() -> AndnaErr` | Module Initialization | **Required first call.** Implemented on `fips/package-v1`; gates all cryptographic entry points through the Rust module state machine. HMAC-SHA-256 CAST, SHAKE256 transcript KAT, ML-DSA-44 KAT, and HMAC-SHA-256 software integrity check (Path A′) are wired into the power-up self-test path in the locked order: CAST → SHAKE256 → ML-DSA-44 → software integrity. Returns `Ok` on success; `Internal` on any self-test failure. No cryptographic function may be called before `andna_init` returns `Ok`. |
 | `andna_verify_vnext` | `(mu_pre: *const u8, mu_pre_len: usize, te: *const u8, te_len: usize, sig: *const u8, sig_len: usize) -> AndnaErr` | Proof Verification | Decomposed verifier. Accepts mu_pre (274 bytes), T_E, and signature separately. Validates ML-DSA-44 transcript. Returns `Ok` (ACCEPT) or a specific reject code. |
 | `andna_verify_frame_v2` | `(frame: *const u8, frame_len: usize) -> AndnaErr` | Proof Verification (packed) | Primary operational path. Accepts packed 4030-byte Frame v2 (mu_pre \|\| T_E \|\| sig). Runs verification and appends one record to the Rust-owned AuditSink. |
 | `andna_parse_mu_pre_header` | `(mu_pre: *const u8, mu_pre_len: usize, out_device_id32: *mut u8, out_epoch: *mut u64, out_sid: *mut u8) -> AndnaErr` | Header Parsing | Pre-crypto fast-path parser. Extracts `device_id32`, `epoch`, and `sid` from mu_pre for gating logic before committing to full verification. No cryptographic operations. |
@@ -306,9 +307,9 @@ before any cryptographic output is produced.
 | Field | Value |
 |---|---|
 | **Purpose** | Detect unauthorized modification of the module binary |
-| **Mechanism** | Digest verification of `libandna_ffi.so` |
-| **Failure action** | Module enters Error State; all FFI functions return error code |
-| **Implementation status** | **STUB / NON-CONFORMANT — `fips-integrity-stub` feature active. P0 blocker: must be replaced with real HMAC-SHA-256 digest verification before CST lab submission.** |
+| **Mechanism** | HMAC-SHA-256 (FIPS 198-1) of `libandna_ffi.so` verified against the `tag_hex` field of an associated `ANDNA-INTEGRITY-v1` reference file. The reference file additionally records `artifact_sha256`, which is verified before the HMAC comparison. Path discovery via `ANDNA_INTEGRITY_MODULE_PATH` and `ANDNA_INTEGRITY_REF_PATH` environment variables (trusted deployment configuration — see Section 11). |
+| **Failure action** | Module enters Error State; all FFI functions return `AndnaErr::Internal` |
+| **Implementation status** | **Implemented (Path A′).** Validated end-to-end in Docker and on GitHub Actions HostB. Smoke test covers valid pair (rc=0), missing env (rc=100), tampered module (rc=100), tampered reference (rc=100). |
 
 #### 7.1.2 ML-DSA-44 Known Answer Test (KAT)
 
@@ -316,7 +317,7 @@ before any cryptographic output is produced.
 |---|---|
 | **Purpose** | Verify correct operation of the ML-DSA-44 signature verification primitive |
 | **Test type** | sigVer KAT — fixed keypair, fixed message, fixed signature |
-| **Vectors** | 6 ACVP self-generated vectors in `andna-mldsa44`. P0 blocker: NIST-issued ACVP sigVer vectors must be substituted at CST lab engagement. |
+| **Vectors** | Official NIST ACVP-Server FIPS 204 sigVer vectors (external interface, preHash=pure), vendored under `crates/mldsa44/tests/vectors/`. Power-up KAT uses tcId 11 (expected-valid case). Harness passes 10/10. |
 | **Pass condition** | Valid signature: ACCEPT. Corrupted signature (one bit flipped): REJECT. |
 | **Failure action** | Module enters Error State; all FFI functions return error code |
 | **Implementation status** | **Wired into `andna_init()` power-up self-test path on `fips/package-v1`. Passes in `cargo test -p andna-ffi` with FIPS features (12/12).** Remaining P0 blocker: replace self-generated vectors with NIST ACVP sigVer vectors. |
@@ -369,24 +370,27 @@ version. The Dockerfile pins the base OS image by digest.
 
 ### 8.2 Reproducible Build Verification (Gate 1)
 
-The module implements a verifiable deterministic build process.
-The build was independently executed on two isolated hosts,
-producing byte-identical output:
+The module implements a verifiable deterministic build process. The build
+is independently executed on local Windows + Docker Desktop and on GitHub
+Actions HostB (ephemeral Ubuntu), producing a byte-identical two-artifact
+bundle:
 
 | Field | Value |
 |---|---|
-| **Rust Toolchain** | 1.76.0 |
+| **Rust Toolchain** | 1.93.1 |
 | **liboqs Version** | 0.10.1 |
 | **Base OS Image** | `debian:bookworm-slim` (pinned by digest `debian@sha256:74d56e3931e0d5a1dd51f8c8a2466d21de84a271cd3b5a733b803aa91abf4421`) |
-| **Build Flags** | `-DOQS_DIST_BUILD=ON`, `-ffile-prefix-map`, `SOURCE_DATE_EPOCH=0` |
-| **Golden Hash (SHA-256)** | `231778903c6c2c345d3eaba423800bc7ec3edb42750518034f083cba40a2ecef` |
-| **Verification** | `gate1_hostB_report.json`, `gate1.yml` GitHub Actions workflow |
-| **Host A** | Windows / WSL2 (local development) |
+| **Build Flags** | `-DOQS_BUILD_ONLY_LIB=ON`, `-DOQS_DIST_BUILD=ON`, `-ffile-prefix-map=/tmp/liboqs=. -ffile-prefix-map=/build=.`, `SOURCE_DATE_EPOCH=1772150400` |
+| **FIPS Feature Set** | `oqs-backend fips-integrity-hmac fips-kat-vectors-embedded` |
+| **Gate 1 Bundle** | See `fips/gate1_golden.md` Section 2 for current hashes (two artifacts: `libandna_ffi.so` and `libandna_ffi.integrity`). |
+| **Verification** | `.github/workflows/hostb_rust_proof.yml` produces the bundle and records both hashes in `build-hashes.txt` |
+| **Host A** | Windows + Docker Desktop (local development) |
 | **Host B** | Ephemeral Ubuntu — GitHub Actions (remote CI) |
-| **Result** | Exact match — byte-identical artifact across both hosts |
+| **Result** | Exact match — byte-identical bundle across both hosts |
 
-Full details are in `/fips/build_manifest.json` and
-`/fips/build_environment.md`.
+Full details, including line-endings hygiene and the engineering history
+of the cross-host result, are in `fips/gate1_golden.md` and
+`fips/build_manifest.json`.
 
 ### 8.3 Guidance Documentation
 
@@ -449,10 +453,11 @@ the scope of the FIPS validation.
 2. **The `oqs-backend` feature must be compiled in.** The `stub`
    feature must not be present in any Approved Mode artifact.
 
-3. **The Golden Hash must be verified before deployment.**
-   The SHA-256 digest of `libandna_ffi.so` must be confirmed to
-   match `231778903c6c2c345d3eaba423800bc7ec3edb42750518034f083cba40a2ecef`
-   before the module is placed in service.
+3. **The Gate 1 bundle must be verified before deployment.**
+   Both `libandna_ffi.so` and `libandna_ffi.integrity` must be confirmed
+   to match the SHA-256 values recorded in `fips/gate1_golden.md`
+   Section 2 before the module is placed in service. Both files must
+   ship together; the runtime integrity check requires both.
 
 4. **The module must be operated in a defined OE.** Deployment
    outside OE-1 through OE-4 is not covered by the validation.
@@ -502,6 +507,27 @@ This document and the associated FIPS package do not claim:
 - **Security claims for the `stub` feature artifact** under any
   circumstances.
 
+  - **HMAC integrity key (non-secret).** The HMAC-SHA-256 integrity key is
+  a non-secret software-integrity test key, embedded in the module. It is
+  not claimed to provide secrecy or confidentiality. The integrity check
+  is designed to detect unauthorized or accidental modification of the
+  module artifact under the approved build and deployment process. It
+  does not provide cryptographic tamper resistance against a fully
+  privileged adversary capable of reverse-engineering and modifying both
+  the module binary and its associated integrity reference file.
+
+- **Env-var trust boundary.** The software-integrity self-test relies on
+  the runtime environment to honestly identify the module file via
+  `ANDNA_INTEGRITY_MODULE_PATH` and the associated reference file via
+  `ANDNA_INTEGRITY_REF_PATH`. These environment variables are treated as
+  trusted deployment configuration: they are within the trust boundary
+  of the operator's deployment but outside the cryptographic module
+  boundary. The module does not, and at this validation level cannot,
+  defend against an attacker who has the capability to set these
+  environment variables in the operator's process, redirecting
+  verification to an unmodified copy of the module while a modified copy
+  is actually loaded.
+
 ---
 
 ## 12. Glossary
@@ -547,14 +573,16 @@ This document and the associated FIPS package do not claim:
 
 ---
 
-## P0 Blockers Before CST Lab Submission
+## Open Items Before CST Lab Submission
 
-The following items must be resolved before this security policy is submitted to the CST laboratory:
+| # | Item | Status |
+|---|---|---|
+| 1 | CST-lab ACVP test session and CAVP certificates for ML-DSA-44, SHAKE256, and HMAC-SHA-256 | Pending lab engagement |
 
-| # | Blocker | Current State | Required |
-|---|---|---|---|
-| P0-1 | Software integrity check | **STUB / NON-CONFORMANT** — `fips-integrity-stub` feature; no real digest verification performed | Replace with HMAC-SHA-256 (FIPS 198-1) digest verification of `libandna_ffi.so` against a reference value embedded in the module |
-| P0-2 | ML-DSA-44 KAT vectors | Self-generated ACVP sigVer vectors (6 tests in `andna-mldsa44`). KAT is wired into `andna_init()` and passes. | Replace with official NIST ACVP sigVer vectors issued by the CST lab |
+**Closed engineering items** (retained for traceability):
+
+- ~~P0-1: Software integrity check~~ — **CLOSED** (v1.2.0). Implemented as HMAC-SHA-256 Path A′ on `fips/hmac-integrity`. Replaces the prior `fips-integrity-stub` placeholder.
+- ~~P0-2: ML-DSA-44 KAT vectors~~ — **CLOSED** (v1.2.0). Replaced self-generated vectors with official NIST ACVP-Server external/pure sigVer vectors (tcId 11).
 
 ---
 
@@ -564,3 +592,4 @@ The following items must be resolved before this security policy is submitted to
 |---|---|---|
 | 1.0.0 | 2026-03-10 | Initial draft. All five FIPS package documents complete. Three blocking items identified: `andna_init()` implementation, KAT wiring into FFI init path, software integrity test. |
 | 1.1.0 | 2026-05-25 | Updated Section 2.1: `andna_init()` implemented on `fips/package-v1`; SHAKE256 and ML-DSA-44 KATs wired into power-up self-test path; software integrity labeled STUB/NON-CONFORMANT. Updated Section 7.1 self-test status. Added Python boundary note to Section 1.3. Added `fips-integrity-stub` exclusion. Added P0 Blockers section. |
+| 1.2.0 | 2026-05-30 | Updated to reflect post-HMAC-integrity state. Section 1.4: Approved Mode condition #2 now references the two-artifact Gate 1 bundle via `fips/gate1_golden.md` rather than the dead `231778...` hash. Section 2.1: `andna_init` description updated with the locked self-test order (HMAC CAST → SHAKE256 → ML-DSA-44 → software integrity). Section 7.1.1: software integrity status flipped from STUB/NON-CONFORMANT to Implemented (Path A′); mechanism row describes the `ANDNA-INTEGRITY-v1` reference file and env-var path discovery. Section 7.1.2: ML-DSA-44 KAT vectors row updated to reflect vendored NIST ACVP-Server vectors. Section 8.2: Gate 1 details refreshed to current state (1.93.1, current build flags, two-artifact bundle, `hostb_rust_proof.yml` workflow); dead references to `build_environment.md` and `gate1_hostB_report.json` removed. Section 9 rule #3: updated to reference the bundle via `gate1_golden.md`. Section 11: added two new non-claims (non-secret HMAC integrity key, env-var trust boundary). P0 Blockers section: both engineering items closed; only the CST-lab ACVP session remains. |

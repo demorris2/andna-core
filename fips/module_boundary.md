@@ -57,7 +57,7 @@ These crates are compiled into `libandna_ffi.so` and are within the FIPS logical
 | `andna-core` | Verification orchestrator | Implements `verify_vnext()` and `verify_frame_v2()`. Sequences: frame parse → pk_hash binding check → μ derivation → ML-DSA-44 verify. Called directly by `andna-ffi`. |
 | `andna-codec` | Strict zero-allocation frame parser/packer | Parses and validates Frame v2 (4030 bytes) and mu_pre (274 bytes). Called by `andna-core` and directly by `andna-ffi` for `andna_parse_mu_pre_header`. No cryptographic operations — pure structural validation and canonical encoding. |
 | `andna-transcript` | SHAKE256 derivation | Computes `pk_hash = SHAKE256(T_E, 64)` and `μ = SHAKE256(mu_pre, 64)`. Constant-time output comparison. Contains the three authoritative SHAKE256 KAT vectors (KAT-T0, KAT-T1, KAT-T2). |
-| `andna-mldsa44` | ML-DSA-44 verify engine | Wraps `liboqs` ML-DSA-44 verify via `oqs-sys`. Must be compiled with `oqs-backend` feature. The `stub` feature is an always-pass CI shim — prohibited in Approved Mode. Contains 6 ACVP self-gen tests. |
+| `andna-mldsa44` | ML-DSA-44 verify engine | Wraps `liboqs` ML-DSA-44 verify via `oqs-sys`. Must be compiled with `oqs-backend` feature. The `stub` feature is an always-pass CI shim — prohibited in Approved Mode. Includes the vendored NIST ACVP-Server external/pure sigVer vector harness (`tests/acvp_sigver.rs`) — 10/10 vectors passing. |
 | `andna-contracts` | Compile-time constants and assertions | Single source of truth for all protocol constants. 25+ compile-time `assert!` guards enforce invariants at build time. Generates `include/andna_vnext_contracts.h` with `_Static_assert` guards for C consumers. No cryptographic operations. |
 | `liboqs` 0.10.1 (vendored C) | ML-DSA-44 and SHAKE256 primitives | C library compiled from source at version 0.10.1 with `-DOQS_DIST_BUILD=ON`. Linked statically into the Rust module. Within boundary. Not independently FIPS-validated — under test as part of this module. |
 
@@ -78,7 +78,7 @@ These components are explicitly excluded from the FIPS logical boundary. No secu
 | Demo scripts and integration tooling | Not part of the module under test. |
 | AIPMP | Internal product management tooling. Not part of the module under test. |
 | `stub` feature of `andna-mldsa44` | Always-pass CI bootstrap shim. Explicitly non-approved. Produces no real cryptographic output. Prohibited in Approved Mode builds. |
-| `fips-integrity-stub` feature of `andna-ffi` | **STUB / NON-CONFORMANT.** Placeholder software integrity shim. Does not perform real HMAC-SHA-256 binary integrity verification. P0 blocker — must be replaced with a real HMAC-SHA-256 check before CST lab submission. Prohibited in any Approved Mode artifact. |
+| `fips-integrity-stub` feature of `andna-ffi` | **Development only.** Software-integrity shim that always passes — used for fast iteration in non-release builds. Mutually exclusive with `fips-integrity-hmac` (enforced by crate-root `compile_error!` gates). Prohibited in any Approved Mode artifact. The real software-integrity mechanism is HMAC-SHA-256 (Path A′), wired under the `fips-integrity-hmac` feature; see Section 9 and `fips/algorithm_inventory.md` Section 4.4. |
 
 > **Python Boundary Note:** Python tooling (`python/andna/`, Replay Engine CLI, FastAPI layer) is **outside the FIPS cryptographic module boundary**. Python is non-authoritative and does not provide Approved Mode cryptographic services. The Python layer calls the module via ctypes FFI but is not compiled into it. No FIPS security claim applies to any Python component.
 
@@ -92,7 +92,7 @@ The following functions constitute the complete public interface of the cryptogr
 
 | Export | Signature | FIPS Role | Description |
 |---|---|---|---|
-| `andna_init` | `() -> AndnaErr` | **Module Initialization** | Power-up self-test gate. Implemented on `fips/package-v1`; gates all cryptographic entry points through the Rust module state machine (Uninitialized → Approved / Error). SHAKE256 transcript KAT and ML-DSA-44 KAT are wired into the power-up self-test path. Software integrity check (HMAC-SHA-256) is a P0 blocker — currently stubbed via `fips-integrity-stub` **(STUB / NON-CONFORMANT — must be replaced before CST lab submission)**. Returns `Ok` on success; `Internal` on any failure. |
+| `andna_init` | `() -> AndnaErr` | **Module Initialization** | Power-up self-test gate. Gates all cryptographic entry points through the Rust module state machine (Uninitialized → Approved / Error). Runs the locked self-test sequence: HMAC-SHA-256 CAST → SHAKE256 KAT → ML-DSA-44 KAT (vendored NIST ACVP external/pure tcId 11) → software integrity check (HMAC-SHA-256, Path A′; see `fips/algorithm_inventory.md` Section 4.4). Returns `Ok` on success; `Internal` on any failure. |
 | `andna_verify_vnext` | `(mu_pre: *const u8, mu_pre_len: usize, te: *const u8, te_len: usize, sig: *const u8, sig_len: usize) -> AndnaErr` | Cryptographic | Decomposed verifier. Accepts mu_pre (274 bytes), T_E (1336 bytes), and signature (2420 bytes) separately. Validates ML-DSA-44 transcript. Primary approved cryptographic service. |
 | `andna_verify_frame_v2` | `(frame: *const u8, frame_len: usize) -> AndnaErr` | Cryptographic | Packed Frame v2 verifier (4030 bytes = mu_pre \|\| T_E \|\| sig). Primary operational path. Calls `andna-core::verify_frame_v2` then appends one record to the AuditSink (boundary-excluded). |
 | `andna_parse_mu_pre_header` | `(mu_pre: *const u8, mu_pre_len: usize, out_device_id32: *mut u8, out_epoch: *mut u64, out_sid: *mut u8) -> AndnaErr` | Non-cryptographic | Fast-path header parser via `andna-codec`. Extracts `device_id32`, `epoch`, and `sid` from mu_pre for pre-crypto gating. No cryptographic operations. |
@@ -155,7 +155,7 @@ The module operates in **Approved Mode** when and only when all of the following
 
 1. The artifact is compiled from the exact source commit and toolchain defined in `/fips/build_manifest.json`.
 2. The `andna-mldsa44` crate is compiled with the `oqs-backend` feature flag enabled. The `stub` feature must not be present in any Approved Mode build.
-3. The SHA-256 digest of `libandna_ffi.so` matches the Gate 1 Golden Hash: `231778903c6c2c345d3eaba423800bc7ec3edb42750518034f083cba40a2ecef`. See Section 8.3 for the distinct R1 Proof Pack audit chain anchor.
+3. The Gate 1 bundle — both `libandna_ffi.so` and `libandna_ffi.integrity` — matches the SHA-256 values recorded in `fips/gate1_golden.md` Section 2. Both files must ship together; the runtime software-integrity self-test requires both. See Section 8.3 for the distinct R1 Proof Pack audit chain anchor.
 4. The module is loaded in one of the Operational Environments defined in `/fips/operational_environments.md`.
 5. `andna_init()` has been called and returned `AndnaErr::Ok`, confirming all power-up self-tests completed successfully before any cryptographic output was produced.
 
@@ -196,7 +196,7 @@ Two digests appear in AN-DNA documentation. They are distinct artifacts with dis
 
 | Anchor | Digest | Artifact | Algorithm | Purpose |
 |---|---|---|---|---|
-| Gate 1 Golden Hash | `231778903c6c2c345d3eaba423800bc7ec3edb42750518034f083cba40a2ecef` | `libandna_ffi.so` binary | SHA-256 | **FIPS Approved Mode condition.** Proves deterministic cross-platform binary reproducibility. Anchors the module binary identity. |
+| Gate 1 Bundle | See `fips/gate1_golden.md` Section 2 (two SHA-256 hashes — `libandna_ffi.so` and `libandna_ffi.integrity`) | Two-artifact bundle (`libandna_ffi.so` + `libandna_ffi.integrity`) | SHA-256 | **FIPS Approved Mode condition.** Proves deterministic cross-host binary reproducibility for the full bundle. Anchors the module identity, including the runtime integrity reference. |
 | R1 Proof Pack Anchor | `85f4dc18777bc2122cf671dce6c2d69d92c80b5d0dbd78a83a644afa1159818d` | `manifest.json` → `verification_digest` | SHA3-256 | **Gate 2 procurement evidence.** Proves deterministic audit chain output across Host A and Host B for the fixture verification session. Not a module binary hash. Outside FIPS boundary. |
 
 The Gate 1 Golden Hash is the FIPS-relevant value. The R1 Proof Pack Anchor is a procurement evidence artifact for the `andna_audit.jsonl` chain and is outside the FIPS boundary.
@@ -256,10 +256,14 @@ The following services are available in **all states** (informational, no crypto
 
 The following items are **blocking** for FIPS 140-3 submission. No other changes are required to the module architecture before lab engagement.
 
-| # | Blocker | Current State | Required |
-|---|---|---|---|
-| P0-1 | Software integrity check | **STUB / NON-CONFORMANT** — `fips-integrity-stub` feature; no real digest verification performed | Replace with HMAC-SHA-256 digest verification of `libandna_ffi.so` against a reference value embedded in the module |
-| P0-2 | ML-DSA-44 KAT vectors | Self-generated ACVP vectors (6 tests in `andna-mldsa44`). SHAKE256 KAT vectors are internally generated and verified. | Replace ML-DSA-44 sigVer vectors with official NIST ACVP vectors issued by the CST lab. SHAKE256 vectors require ACVP AFT confirmation. |
+| # | Item | Status |
+|---|---|---|
+| 1 | CST-lab ACVP test session and CAVP certificates for ML-DSA-44, SHAKE256, and HMAC-SHA-256 | Pending lab engagement |
+
+**Closed engineering items** (retained for traceability):
+
+- ~~P0-1: Software integrity check~~ — **CLOSED** (v1.3.0). Implemented as HMAC-SHA-256 Path A′ on `fips/hmac-integrity`. Full-file HMAC of `libandna_ffi.so` against an associated `ANDNA-INTEGRITY-v1` reference file with caller-supplied paths. Replaces the prior `fips-integrity-stub` placeholder. Validated end-to-end in Docker and on GitHub Actions HostB.
+- ~~P0-2: ML-DSA-44 KAT vectors~~ — **CLOSED** (v1.3.0). Replaced self-generated vectors with the official NIST ACVP-Server external/pure sigVer vector set (tcId 11 as the power-up KAT case). The SHAKE256 KAT vectors remain internally generated as documented in `fips/algorithm_inventory.md` Section 4.2; ACVP AFT confirmation is part of the CST-lab session above.
 
 ---
 
@@ -271,6 +275,9 @@ This document does not claim:
 - CAVP certification for ML-DSA-44 or SHAKE256. ACVP testing through the CST lab is required before any CAVP certificate can be issued.
 - That `liboqs` 0.10.1 is independently FIPS-validated. It is not. The FIPS validation claim applies to the AN-DNA module as a whole, with `liboqs` as the embedded implementation under test.
 - Security claims for `andna-audit`, the Replay Engine, the Python layer, or any other component outside the boundary defined in Section 3.1.
+- **HMAC integrity key (non-secret).** The HMAC-SHA-256 integrity key used by the software-integrity self-test (Section 4 / `fips/algorithm_inventory.md` Section 4.4) is a non-secret software-integrity test key, embedded in the module. It is not claimed to provide secrecy or confidentiality. The integrity check is designed to detect unauthorized or accidental modification of the module artifact under the approved build and deployment process. It does not provide cryptographic tamper resistance against a fully privileged adversary capable of reverse-engineering and modifying both the module binary and its associated integrity reference file.
+
+- **Env-var trust boundary.** The software-integrity self-test relies on the runtime environment to honestly identify the module file via `ANDNA_INTEGRITY_MODULE_PATH` and the associated reference file via `ANDNA_INTEGRITY_REF_PATH`. These environment variables are treated as trusted deployment configuration: they are within the trust boundary of the operator's deployment but outside the cryptographic module boundary. The module does not, and at this validation level cannot, defend against an attacker who has the capability to set these environment variables in the operator's process, redirecting verification to an unmodified copy of the module while a modified copy is actually loaded.
 
 ---
 
@@ -281,3 +288,4 @@ This document does not claim:
 | 1.0.0 | 2026-03-10 | Initial draft. Gate 1 build parameters incorporated. Three-function FFI surface (speculative). |
 | 1.1.0 | 2026-03-10 | Full boundary pass from source inspection of `andna-ffi/src/lib.rs` and R1 artifacts. Added `andna-core` and `andna-codec` to Section 3.1 (two previously missing crates). Added `xtask`, `contracts_codegen`, `ffi_cli` to Section 3.2. Added Section 5 (protocol constants with authoritative TE_LEN=1336). Added Section 8 (design assurance: three-layer constant enforcement, cbindgen/xtask drift detection, parity anchor disambiguation, memory safety boundary detail). Updated Section 4 to reflect complete 8-function FFI surface (7 implemented + andna_init specified). Added AndnaErr enum table. Corrected return type from i32 to AndnaErr throughout. |
 | 1.2.0 | 2026-05-25 | Updated Section 4: `andna_init()` is implemented on `fips/package-v1`; SHAKE256 and ML-DSA-44 KATs wired into power-up self-test path; STUB/NON-CONFORMANT label added for `fips-integrity-stub`. Corrected TE_LEN to 1336 (matches `TE_V1_LEN` compile-time assertion in `andna-contracts`; prior value was wrong). Removed erroneous "+2 reserved" from TE_LEN breakdown. Added Python boundary note. Refined audit chain boundary statement. Added Section 9 (State Machine + Cryptographic Services), Section 10 (P0 Blockers). Renumbered Non-Claims to Section 11. |
+| 1.3.0 | 2026-05-30 | Updated to reflect post-HMAC-integrity state. Section 3.1: `andna-mldsa44` row updated to describe the vendored NIST ACVP external/pure harness (10/10) rather than self-generated tests. Section 3.2: `fips-integrity-stub` reclassified from STUB/NON-CONFORMANT to "development only," with cross-reference to the real `fips-integrity-hmac` mechanism. Section 4: `andna_init` description rewritten to describe the locked self-test sequence (HMAC CAST → SHAKE256 → ML-DSA-44 → software integrity). Section 7 Approved Mode condition #3 updated: now references the two-artifact Gate 1 bundle via `fips/gate1_golden.md` rather than the dead `231778...` hash. Section 8.3 Parity Anchors table: Gate 1 entry rewritten as a bundle anchor pointing at `gate1_golden.md` Section 2. Section 10 P0 Blockers: both engineering items closed; only the CST-lab ACVP session remains. Section 11: added two new non-claims (non-secret HMAC integrity key, env-var trust boundary). |

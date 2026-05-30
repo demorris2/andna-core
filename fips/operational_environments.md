@@ -42,11 +42,11 @@ in this environment.
 | **Multi-chip Embodiment** | No — single-chip software module |
 | **Runtime** | Standard Linux userspace — no special runtime required |
 
-**Rationale:** OE-1 matches the GitHub Actions Host B environment used for Gate 1
-cross-platform verification. Ubuntu 22.04 LTS on x86\_64 with no hypervisor is the
-environment in which the Golden Hash
-`231778903c6c2c345d3eaba423800bc7ec3edb42750518034f083cba40a2ecef` was independently
-produced and verified.
+**Rationale:** OE-1 is anchored to the Gate 1 cross-host bundle verification result:
+the same two-artifact bundle (`libandna_ffi.so` + `libandna_ffi.integrity`)
+is independently produced on the GitHub Actions Ubuntu HostB and on local
+Windows + Docker Desktop. See `fips/gate1_golden.md` Section 5 for the
+current hashes and cross-host evidence.
 
 ---
 
@@ -144,3 +144,4 @@ computing platforms and is fully supported at FIPS 140-3 Level 1.
 |---|---|---|
 | 1.0.0 | 2026-03-10 | Initial draft. OE-1 anchored to Gate 1 Host B verification. |
 | 1.1.0 | 2026-03-10 | Corrected OE-2: Gate 1 Host A ran under WSL2 (Linux environment), produces `libandna_ffi.so` not a native Windows DLL. Added note distinguishing WSL2 build lane from native Windows MSVC/MinGW build target. |
+| 1.2.0 | 2026-05-30 | Section 2 OE-1 rationale updated: replaced the dead `231778903c...` hash reference with a pointer to `fips/gate1_golden.md` Section 5 for current bundle hashes and cross-host evidence. The OE definition itself is unchanged. |
