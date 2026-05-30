@@ -22,6 +22,8 @@ use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 #[cfg(feature = "fips-integrity-hmac")]
 use subtle::ConstantTimeEq;
+#[cfg(feature = "fips-integrity-hmac")]
+use std::path::Path;
 
 // ── FIPS software-integrity mode: exactly one must be selected ──────────────
 // fips-integrity-stub: development shim (STUB / NON-CONFORMANT), always passes.
@@ -845,6 +847,12 @@ const ANDNA_INTEGRITY_KEY_STATUS: &str = "non-secret-integrity-test-key";
 const ANDNA_INTEGRITY_KEY: [u8; 32] = *b"ANDNA-R1-INTEGRITY-HMAC-KEY-0001";
 
 #[cfg(feature = "fips-integrity-hmac")]
+const ANDNA_INTEGRITY_MODULE_PATH_ENV: &str = "ANDNA_INTEGRITY_MODULE_PATH";
+
+#[cfg(feature = "fips-integrity-hmac")]
+const ANDNA_INTEGRITY_REF_PATH_ENV: &str = "ANDNA_INTEGRITY_REF_PATH";
+
+#[cfg(feature = "fips-integrity-hmac")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct IntegrityReference {
     artifact: String,
@@ -1000,6 +1008,41 @@ fn verify_integrity_reference_for_bytes(reference: &IntegrityReference, artifact
     constant_time_eq_32(&tag, &reference.tag)
 }
 
+#[cfg(feature = "fips-integrity-hmac")]
+fn verify_software_integrity_from_paths(module_path: &Path, reference_path: &Path) -> bool {
+    let module_bytes = match std::fs::read(module_path) {
+        Ok(bytes) => bytes,
+        Err(_) => return false,
+    };
+
+    let reference_text = match std::fs::read_to_string(reference_path) {
+        Ok(text) => text,
+        Err(_) => return false,
+    };
+
+    let reference = match parse_integrity_reference(&reference_text) {
+        Some(reference) => reference,
+        None => return false,
+    };
+
+    verify_integrity_reference_for_bytes(&reference, &module_bytes)
+}
+
+#[cfg(feature = "fips-integrity-hmac")]
+fn run_hmac_software_integrity_test() -> bool {
+    let module_path = match std::env::var(ANDNA_INTEGRITY_MODULE_PATH_ENV) {
+        Ok(path) if !path.trim().is_empty() => path,
+        _ => return false,
+    };
+
+    let reference_path = match std::env::var(ANDNA_INTEGRITY_REF_PATH_ENV) {
+        Ok(path) if !path.trim().is_empty() => path,
+        _ => return false,
+    };
+
+    verify_software_integrity_from_paths(Path::new(&module_path), Path::new(&reference_path))
+}
+
 fn run_software_integrity_test() -> bool {
     #[cfg(feature = "fips-integrity-stub")]
     {
@@ -1009,11 +1052,7 @@ fn run_software_integrity_test() -> bool {
 
     #[cfg(all(feature = "fips-integrity-hmac", not(feature = "fips-integrity-stub")))]
     {
-        // Commit 2 only wires the HMAC primitive CAST and helper functions.
-        // The full Path A' software integrity check is implemented in the next
-        // commit. Until then, the real HMAC integrity lane must fail closed.
-        let _cast_ok = run_hmac_sha256_cast();
-        return false;
+        return run_hmac_software_integrity_test();
     }
 
     #[cfg(all(
@@ -1022,8 +1061,7 @@ fn run_software_integrity_test() -> bool {
     ))]
     {
         // Unreachable in valid builds because the crate-root compile_error!
-        // above rejects this feature combination. This return exists only to
-        // keep type checking clean while the compile_error! is emitted.
+        // rejects this feature combination. This keeps type checking clean.
         return false;
     }
 }
@@ -1075,9 +1113,22 @@ pub extern "C" fn andna_init() -> AndnaErr {
         }
     }
 
-    // ── Self-test sequence ─────────────────────────────────────────────────
+        // ── Self-test sequence ─────────────────────────────────────────────────
     // Each test transitions to ERROR on failure (sticky — no recovery without
-    // reload). On any failure the function returns Internal immediately.
+    // module reload).
+
+    // 0. HMAC-SHA-256 CAST
+    //
+    // Required before the HMAC primitive is used for software integrity.
+    // Development/stub builds do not use HMAC for integrity, so this CAST is
+    // compiled only for the real HMAC lane.
+    #[cfg(feature = "fips-integrity-hmac")]
+    {
+        if !run_hmac_sha256_cast() {
+            MODULE_STATE.store(STATE_ERROR, Ordering::SeqCst);
+            return AndnaErr::Internal;
+        }
+    }
 
     // 1. SHAKE256 KAT
     if !run_shake256_kat() {
@@ -1796,25 +1847,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "fips-integrity-hmac")]
-    #[test]
-    fn hmac_integrity_lane_fails_closed_until_file_check_is_implemented() {
-        let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-        reset_module_state();
-
-        assert_eq!(
-            andna_init(),
-            AndnaErr::Internal,
-            "fips-integrity-hmac lane must fail closed until the full file integrity check is implemented"
-        );
-
-        assert_eq!(
-            MODULE_STATE.load(Ordering::Relaxed),
-            STATE_ERROR,
-            "MODULE_STATE should be ERROR after fail-closed HMAC integrity placeholder"
-        );
-    }
-
+    
         #[cfg(feature = "fips-integrity-hmac")]
     fn to_hex32(bytes: &[u8; 32]) -> String {
         const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -1949,5 +1982,159 @@ mod tests {
 
         assert_eq!(decode_hex32(lower), decode_hex32(upper));
         assert!(decode_hex32(lower).is_some());
+    }
+
+        #[cfg(feature = "fips-integrity-hmac")]
+    fn unique_integrity_test_path(name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+
+        std::env::temp_dir().join(format!(
+            "andna-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    fn write_integrity_test_pair(
+        artifact_bytes: &[u8],
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        let module_path = unique_integrity_test_path("module.bin");
+        let ref_path = unique_integrity_test_path("module.integrity");
+
+        let reference = sample_integrity_reference_for_bytes(artifact_bytes);
+
+        std::fs::write(&module_path, artifact_bytes)
+            .expect("should write module test file");
+        std::fs::write(&ref_path, reference)
+            .expect("should write integrity reference test file");
+
+        (module_path, ref_path)
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    fn remove_integrity_test_pair(module_path: &std::path::Path, ref_path: &std::path::Path) {
+        let _ = std::fs::remove_file(module_path);
+        let _ = std::fs::remove_file(ref_path);
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn software_integrity_from_paths_accepts_valid_reference() {
+        let artifact = b"andna runtime integrity artifact bytes";
+        let (module_path, ref_path) = write_integrity_test_pair(artifact);
+
+        assert!(
+            verify_software_integrity_from_paths(&module_path, &ref_path),
+            "valid module/reference pair should pass"
+        );
+
+        remove_integrity_test_pair(&module_path, &ref_path);
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn software_integrity_from_paths_rejects_tampered_module_file() {
+        let artifact = b"andna runtime integrity artifact bytes";
+        let (module_path, ref_path) = write_integrity_test_pair(artifact);
+
+        let mut tampered = artifact.to_vec();
+        tampered[0] ^= 0x01;
+        std::fs::write(&module_path, tampered)
+            .expect("should write tampered module test file");
+
+        assert!(
+            !verify_software_integrity_from_paths(&module_path, &ref_path),
+            "tampered module bytes must fail"
+        );
+
+        remove_integrity_test_pair(&module_path, &ref_path);
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn software_integrity_from_paths_rejects_tampered_reference_file() {
+        let artifact = b"andna runtime integrity artifact bytes";
+        let (module_path, ref_path) = write_integrity_test_pair(artifact);
+
+        let mut reference = std::fs::read_to_string(&ref_path)
+            .expect("should read reference file");
+
+        reference = reference.replace("algorithm=HMAC-SHA-256", "algorithm=SHA-256");
+
+        std::fs::write(&ref_path, reference)
+            .expect("should write tampered reference file");
+
+        assert!(
+            !verify_software_integrity_from_paths(&module_path, &ref_path),
+            "tampered reference must fail"
+        );
+
+        remove_integrity_test_pair(&module_path, &ref_path);
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn software_integrity_from_paths_rejects_missing_files() {
+        let missing_module = unique_integrity_test_path("missing-module.bin");
+        let missing_ref = unique_integrity_test_path("missing.integrity");
+
+        assert!(
+            !verify_software_integrity_from_paths(&missing_module, &missing_ref),
+            "missing files must fail closed"
+        );
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn hmac_integrity_lane_requires_env_paths() {
+        let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        reset_module_state();
+
+        std::env::remove_var(ANDNA_INTEGRITY_MODULE_PATH_ENV);
+        std::env::remove_var(ANDNA_INTEGRITY_REF_PATH_ENV);
+
+        assert_eq!(
+            andna_init(),
+            AndnaErr::Internal,
+            "fips-integrity-hmac lane must fail closed when env paths are missing"
+        );
+
+        assert_eq!(
+            MODULE_STATE.load(Ordering::Relaxed),
+            STATE_ERROR,
+            "MODULE_STATE should be ERROR after missing env-path integrity failure"
+        );
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn hmac_integrity_lane_accepts_valid_env_paths() {
+        let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        reset_module_state();
+
+        let artifact = b"andna runtime integrity artifact bytes";
+        let (module_path, ref_path) = write_integrity_test_pair(artifact);
+
+        std::env::set_var(ANDNA_INTEGRITY_MODULE_PATH_ENV, &module_path);
+        std::env::set_var(ANDNA_INTEGRITY_REF_PATH_ENV, &ref_path);
+
+        assert_eq!(
+            andna_init(),
+            AndnaErr::Ok,
+            "valid HMAC integrity env paths should allow andna_init to pass"
+        );
+
+        assert_eq!(
+            MODULE_STATE.load(Ordering::Relaxed),
+            STATE_APPROVED,
+            "MODULE_STATE should be APPROVED after valid HMAC integrity check"
+        );
+
+        std::env::remove_var(ANDNA_INTEGRITY_MODULE_PATH_ENV);
+        std::env::remove_var(ANDNA_INTEGRITY_REF_PATH_ENV);
+        remove_integrity_test_pair(&module_path, &ref_path);
     }
 }
