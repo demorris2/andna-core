@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "fips-integrity-hmac")]
 use hmac::{Hmac, Mac};
 #[cfg(feature = "fips-integrity-hmac")]
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 #[cfg(feature = "fips-integrity-hmac")]
 use subtle::ConstantTimeEq;
 
@@ -808,6 +808,196 @@ fn run_hmac_sha256_cast() -> bool {
         Some(tag) => constant_time_eq_32(&tag, &HMAC_SHA256_CAST_TAG),
         None => false,
     }
+}
+
+// ── Path A' software-integrity reference helpers ───────────────────────────
+//
+// Path A' verifies the full libandna_ffi.so artifact against an associated
+// integrity reference file. This commit adds only the pure, unit-testable
+// helpers. Runtime file I/O is wired in the next commit.
+//
+// Reference file format:
+//
+// ANDNA-INTEGRITY-v1
+// artifact=libandna_ffi.so
+// algorithm=HMAC-SHA-256
+// key_id=andna-r1-integrity-dev-v1
+// key_status=non-secret-integrity-test-key
+// tag_hex=<64 lowercase/uppercase hex chars>
+// artifact_sha256=<64 lowercase/uppercase hex chars>
+
+#[cfg(feature = "fips-integrity-hmac")]
+const ANDNA_INTEGRITY_SCHEMA: &str = "ANDNA-INTEGRITY-v1";
+
+#[cfg(feature = "fips-integrity-hmac")]
+const ANDNA_INTEGRITY_ARTIFACT: &str = "libandna_ffi.so";
+
+#[cfg(feature = "fips-integrity-hmac")]
+const ANDNA_INTEGRITY_ALGORITHM: &str = "HMAC-SHA-256";
+
+#[cfg(feature = "fips-integrity-hmac")]
+const ANDNA_INTEGRITY_KEY_ID: &str = "andna-r1-integrity-dev-v1";
+
+#[cfg(feature = "fips-integrity-hmac")]
+const ANDNA_INTEGRITY_KEY_STATUS: &str = "non-secret-integrity-test-key";
+
+#[cfg(feature = "fips-integrity-hmac")]
+const ANDNA_INTEGRITY_KEY: [u8; 32] = *b"ANDNA-R1-INTEGRITY-HMAC-KEY-0001";
+
+#[cfg(feature = "fips-integrity-hmac")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct IntegrityReference {
+    artifact: String,
+    algorithm: String,
+    key_id: String,
+    key_status: String,
+    tag: [u8; 32],
+    artifact_sha256: [u8; 32],
+}
+
+#[cfg(feature = "fips-integrity-hmac")]
+fn hex_nibble(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "fips-integrity-hmac")]
+fn decode_hex32(s: &str) -> Option<[u8; 32]> {
+    let bytes = s.as_bytes();
+    if bytes.len() != 64 {
+        return None;
+    }
+
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        let hi = hex_nibble(bytes[2 * i])?;
+        let lo = hex_nibble(bytes[2 * i + 1])?;
+        out[i] = (hi << 4) | lo;
+    }
+
+    Some(out)
+}
+
+#[cfg(feature = "fips-integrity-hmac")]
+fn sha256_bytes(bytes: &[u8]) -> [u8; 32] {
+    let digest = Sha256::digest(bytes);
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest);
+    out
+}
+
+#[cfg(feature = "fips-integrity-hmac")]
+fn compute_integrity_hmac(bytes: &[u8]) -> Option<[u8; 32]> {
+    compute_hmac_sha256(&ANDNA_INTEGRITY_KEY, bytes)
+}
+
+#[cfg(feature = "fips-integrity-hmac")]
+fn parse_integrity_reference(input: &str) -> Option<IntegrityReference> {
+    let mut lines = input.lines().map(str::trim).filter(|line| !line.is_empty());
+
+    if lines.next()? != ANDNA_INTEGRITY_SCHEMA {
+        return None;
+    }
+
+    let mut artifact: Option<String> = None;
+    let mut algorithm: Option<String> = None;
+    let mut key_id: Option<String> = None;
+    let mut key_status: Option<String> = None;
+    let mut tag: Option<[u8; 32]> = None;
+    let mut artifact_sha256: Option<[u8; 32]> = None;
+
+    for line in lines {
+        let (key, value) = line.split_once('=')?;
+        let key = key.trim();
+        let value = value.trim();
+
+        match key {
+            "artifact" => {
+                if artifact.is_some() {
+                    return None;
+                }
+                artifact = Some(value.to_string());
+            }
+            "algorithm" => {
+                if algorithm.is_some() {
+                    return None;
+                }
+                algorithm = Some(value.to_string());
+            }
+            "key_id" => {
+                if key_id.is_some() {
+                    return None;
+                }
+                key_id = Some(value.to_string());
+            }
+            "key_status" => {
+                if key_status.is_some() {
+                    return None;
+                }
+                key_status = Some(value.to_string());
+            }
+            "tag_hex" => {
+                if tag.is_some() {
+                    return None;
+                }
+                tag = Some(decode_hex32(value)?);
+            }
+            "artifact_sha256" => {
+                if artifact_sha256.is_some() {
+                    return None;
+                }
+                artifact_sha256 = Some(decode_hex32(value)?);
+            }
+            _ => return None,
+        }
+    }
+
+    let artifact = artifact?;
+    let algorithm = algorithm?;
+    let key_id = key_id?;
+    let key_status = key_status?;
+    let tag = tag?;
+    let artifact_sha256 = artifact_sha256?;
+
+    if artifact != ANDNA_INTEGRITY_ARTIFACT {
+        return None;
+    }
+    if algorithm != ANDNA_INTEGRITY_ALGORITHM {
+        return None;
+    }
+    if key_id != ANDNA_INTEGRITY_KEY_ID {
+        return None;
+    }
+    if key_status != ANDNA_INTEGRITY_KEY_STATUS {
+        return None;
+    }
+
+    Some(IntegrityReference {
+        artifact,
+        algorithm,
+        key_id,
+        key_status,
+        tag,
+        artifact_sha256,
+    })
+}
+
+#[cfg(feature = "fips-integrity-hmac")]
+fn verify_integrity_reference_for_bytes(reference: &IntegrityReference, artifact_bytes: &[u8]) -> bool {
+    let artifact_sha256 = sha256_bytes(artifact_bytes);
+    if !constant_time_eq_32(&artifact_sha256, &reference.artifact_sha256) {
+        return false;
+    }
+
+    let Some(tag) = compute_integrity_hmac(artifact_bytes) else {
+        return false;
+    };
+
+    constant_time_eq_32(&tag, &reference.tag)
 }
 
 fn run_software_integrity_test() -> bool {
@@ -1623,5 +1813,141 @@ mod tests {
             STATE_ERROR,
             "MODULE_STATE should be ERROR after fail-closed HMAC integrity placeholder"
         );
+    }
+
+        #[cfg(feature = "fips-integrity-hmac")]
+    fn to_hex32(bytes: &[u8; 32]) -> String {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut out = String::with_capacity(64);
+        for b in bytes {
+            out.push(HEX[(b >> 4) as usize] as char);
+            out.push(HEX[(b & 0x0f) as usize] as char);
+        }
+        out
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    fn sample_integrity_reference_for_bytes(bytes: &[u8]) -> String {
+        let tag = compute_integrity_hmac(bytes).expect("HMAC computation should succeed");
+        let sha = sha256_bytes(bytes);
+
+        format!(
+            "{schema}\n\
+             artifact={artifact}\n\
+             algorithm={algorithm}\n\
+             key_id={key_id}\n\
+             key_status={key_status}\n\
+             tag_hex={tag_hex}\n\
+             artifact_sha256={sha_hex}\n",
+            schema = ANDNA_INTEGRITY_SCHEMA,
+            artifact = ANDNA_INTEGRITY_ARTIFACT,
+            algorithm = ANDNA_INTEGRITY_ALGORITHM,
+            key_id = ANDNA_INTEGRITY_KEY_ID,
+            key_status = ANDNA_INTEGRITY_KEY_STATUS,
+            tag_hex = to_hex32(&tag),
+            sha_hex = to_hex32(&sha),
+        )
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn integrity_reference_parses_valid_reference() {
+        let artifact = b"andna test artifact bytes";
+        let text = sample_integrity_reference_for_bytes(artifact);
+
+        let parsed = parse_integrity_reference(&text)
+            .expect("valid integrity reference should parse");
+
+        assert_eq!(parsed.artifact, ANDNA_INTEGRITY_ARTIFACT);
+        assert_eq!(parsed.algorithm, ANDNA_INTEGRITY_ALGORITHM);
+        assert_eq!(parsed.key_id, ANDNA_INTEGRITY_KEY_ID);
+        assert_eq!(parsed.key_status, ANDNA_INTEGRITY_KEY_STATUS);
+        assert!(verify_integrity_reference_for_bytes(&parsed, artifact));
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn integrity_reference_rejects_bad_schema() {
+        let artifact = b"andna test artifact bytes";
+        let mut text = sample_integrity_reference_for_bytes(artifact);
+        text = text.replacen(ANDNA_INTEGRITY_SCHEMA, "BAD-SCHEMA", 1);
+
+        assert!(
+            parse_integrity_reference(&text).is_none(),
+            "bad schema must be rejected"
+        );
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn integrity_reference_rejects_bad_algorithm() {
+        let artifact = b"andna test artifact bytes";
+        let mut text = sample_integrity_reference_for_bytes(artifact);
+        text = text.replace("algorithm=HMAC-SHA-256", "algorithm=SHA-256");
+
+        assert!(
+            parse_integrity_reference(&text).is_none(),
+            "bad algorithm must be rejected"
+        );
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn integrity_reference_rejects_bad_hex_lengths() {
+        let artifact = b"andna test artifact bytes";
+        let text = sample_integrity_reference_for_bytes(artifact)
+            .replace("tag_hex=", "tag_hex=00");
+
+        assert!(
+            parse_integrity_reference(&text).is_none(),
+            "malformed tag hex must be rejected"
+        );
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn integrity_reference_rejects_tampered_artifact_bytes() {
+        let artifact = b"andna test artifact bytes";
+        let text = sample_integrity_reference_for_bytes(artifact);
+
+        let parsed = parse_integrity_reference(&text)
+            .expect("valid integrity reference should parse");
+
+        let mut tampered = artifact.to_vec();
+        tampered[0] ^= 0x01;
+
+        assert!(
+            !verify_integrity_reference_for_bytes(&parsed, &tampered),
+            "tampered artifact bytes must fail integrity verification"
+        );
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn integrity_reference_rejects_tampered_tag() {
+        let artifact = b"andna test artifact bytes";
+        let mut text = sample_integrity_reference_for_bytes(artifact);
+
+        // Flip first hex nibble of the tag field while keeping valid hex length.
+        text = text.replacen("tag_hex=", "tag_hex=1", 1);
+
+        assert!(
+            parse_integrity_reference(&text).is_none()
+                || !verify_integrity_reference_for_bytes(
+                    &parse_integrity_reference(&text).unwrap(),
+                    artifact
+                ),
+            "tampered reference tag must fail parsing or verification"
+        );
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    #[test]
+    fn decode_hex32_accepts_uppercase_and_lowercase() {
+        let lower = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        let upper = "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF";
+
+        assert_eq!(decode_hex32(lower), decode_hex32(upper));
+        assert!(decode_hex32(lower).is_some());
     }
 }
