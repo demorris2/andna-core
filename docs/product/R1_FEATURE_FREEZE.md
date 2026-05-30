@@ -20,16 +20,17 @@
 
 ### Deliverables
 
-- [x] Rust core workspace (7 crates, 46 tests passing)
-- [x] Python bindings (78+ tests passing)
+- [x] Rust core workspace (7 crates)
+- [x] Python bindings
 - [x] FFI boundary with panic safety (Directive C)
 - [x] Security directives A-E implemented and verified
 - [x] Replay CLI (`python -m andna verify/replay/export`)
 - [x] Deterministic structured logging (JSON to stderr)
 - [x] Evidence bundle export (evidence.json + manifest.json + SHA-256 integrity)
-- [ ] Docker reproducible release lane
+- [x] Docker reproducible release lane (cross-host bit-identical bundle; see `fips/gate1_golden.md`)
+- [x] NIST ACVP vectors embedded (vendored NIST ACVP-Server external/pure sigVer, tcId 11)
+- [x] HMAC-SHA-256 software integrity (Path A′) — closes the former P0 integrity stub
 - [ ] SBOM generation
-- [ ] NIST ACVP vectors embedded (download script ready)
 
 ## Allowed Improvements
 
@@ -60,3 +61,11 @@ R1 is complete when:
 5. 1 external validation conversation (Month-4 gate)
 
 Everything else is ornamental.
+
+## Note on FIPS Status
+
+The R1 engineering deliverables above are complete, including the HMAC-SHA-256
+software-integrity check that previously stood as a P0 blocker. R1 is **not** FIPS
+140-3 validated: that requires a CST-lab ACVP test session and CAVP certificate
+issuance, which is external work tracked in `fips/algorithm_inventory.md` Section 6.
+The distinction is deliberate — engineering-complete is not the same as lab-validated.
