@@ -693,7 +693,9 @@ fn run_shake256_kat() -> bool {
 //
 // Both checks must pass. If either fails, the module enters Error State.
 //
-// NOTE: KAT_PK and KAT_SIG are The ML-DSA-44 KAT constants are no longer zero-filled placeholders; they hold the vendored NIST ACVP-Server external/pure sigVer vector (tcId 11). Comment updated to describe the actual provenance
+// KAT_PK and KAT_SIG hold the vendored NIST ACVP-Server FIPS 204 external/pure
+// sigVer vector (tcId 11). Provenance and the full vector set are documented in
+// crates/mldsa44/tests/vectors/README.md.
 
 #[cfg(feature = "oqs-backend")]
 fn run_mldsa44_kat() -> bool {
@@ -1729,37 +1731,10 @@ mod tests {
         }
     }
 
-    /// andna_init() with placeholder zero KAT vectors must return Internal
-    /// (the ML-DSA-44 KAT will fail to verify a zero signature against a
-    /// zero public key). This validates that the KAT gate is live and that
-    /// the module correctly refuses to enter Approved Mode with bad vectors.
-    ///
-    /// This test only runs when `fips-kat-vectors-embedded` is NOT active.
-    /// Once real vectors are embedded, this test is superseded by
-    /// `ffi_init_succeeds_with_real_kat_vectors`.
-    #[cfg(all(feature = "oqs-backend", not(feature = "fips-kat-vectors-embedded")))]
-    #[test]
-    fn ffi_init_fails_with_placeholder_kat_vectors() {
-        let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
-        reset_module_state();
-        let r = andna_init();
-        // With placeholder zero bytes, the ML-DSA-44 KAT must fail.
-        // If this test starts returning Ok, the KAT gate is broken.
-        assert_eq!(
-            r, AndnaErr::Internal,
-            "andna_init should fail with placeholder KAT vectors"
-        );
-        // Module must be in Error State after failed init.
-        assert_eq!(
-            MODULE_STATE.load(Ordering::Relaxed),
-            STATE_ERROR,
-            "MODULE_STATE should be ERROR after failed init"
-        );
-    }
-
-    /// Once real KAT vectors are embedded, andna_init() must return Ok and
-    /// the module must be in Approved Mode. Replace the cfg gate below with
-    /// `#[test]` after embedding vectors via the kat_vector_gen procedure.
+    /// andna_init() with the embedded ML-DSA-44 KAT vectors must return Ok and
+    /// the module must be in Approved Mode. The embedded vectors are the
+    /// vendored NIST ACVP-Server external/pure sigVer vector (tcId 11); see
+    /// crates/mldsa44/tests/vectors/README.md.
     ///
     /// Also validates idempotency: a second call must also return Ok.
     #[cfg(all(feature = "oqs-backend", feature = "fips-kat-vectors-embedded"))]
@@ -1775,10 +1750,14 @@ mod tests {
         assert_eq!(MODULE_STATE.load(Ordering::Relaxed), STATE_APPROVED);
     }
 
-    
-    /// Generate and print the ML-DSA-44 KAT vectors for embedding.
-    /// Run with: cargo test -p andna-ffi --features oqs-backend -- --nocapture kat_vector_gen
-    /// Copy the printed output into KAT_PK and KAT_SIG at the top of lib.rs.
+    /// Utility: generates a fresh self-consistent ML-DSA-44 (pk, msg, sig)
+    /// triple and prints it. Run with:
+    ///   cargo test -p andna-ffi --features oqs-backend -- --nocapture kat_vector_gen
+    /// NOTE: this is NOT the source of the embedded KAT. The authoritative
+    /// KAT_PK/KAT_SIG are the vendored NIST ACVP-Server external/pure sigVer
+    /// vector (tcId 11) — see crates/mldsa44/tests/vectors/README.md. Do not
+    /// overwrite them with this self-generated output. Kept as a debugging aid.
+
     #[cfg(feature = "oqs-backend")]
     #[test]
     fn kat_vector_gen() {

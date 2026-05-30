@@ -567,7 +567,6 @@ This document and the associated FIPS package do not claim:
 | NIST SP 800-140B Rev. 1 | CMVP Security Policy Requirements: FIPS 140-3 Level 1-3 |
 | NIST SP 800-140C | CMVP Approved Security Functions |
 | NIST SP 800-218 | Secure Software Development Framework (SSDF) |
-| gate1_hostB_report.json | AN-DNA Gate 1 Cross-Platform Build Verification Report (2026-03-03) ||
 | /fips/module_boundary.md | AN-DNA Module Boundary Definition v1.0.0 |
 | /fips/build_manifest.json | AN-DNA Build Manifest v1.0.0 |
 | /fips/operational_environments.md | AN-DNA Operational Environments v1.0.0 |
