@@ -693,10 +693,7 @@ fn run_shake256_kat() -> bool {
 //
 // Both checks must pass. If either fails, the module enters Error State.
 //
-// NOTE: KAT_PK and KAT_SIG are currently zero-filled placeholders.
-// The ACCEPT check will correctly fail with zero bytes, preventing the module
-// from entering Approved Mode until real vectors are embedded.
-// See: fips/kat_vector_gen_procedure.md
+// NOTE: KAT_PK and KAT_SIG are The ML-DSA-44 KAT constants are no longer zero-filled placeholders; they hold the vendored NIST ACVP-Server external/pure sigVer vector (tcId 11). Comment updated to describe the actual provenance
 
 #[cfg(feature = "oqs-backend")]
 fn run_mldsa44_kat() -> bool {
@@ -816,7 +813,7 @@ fn run_hmac_sha256_cast() -> bool {
 //
 // Path A' verifies the full libandna_ffi.so artifact against an associated
 // integrity reference file. This commit adds only the pure, unit-testable
-// helpers. Runtime file I/O is wired in the next commit.
+// helpers. Runtime file I/O is wired.
 //
 // Reference file format:
 //
