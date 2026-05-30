@@ -1,79 +1,97 @@
-# AN-DNA / ArcNeura — Claude Code Operating Notes
+# AN-DNA / ArcNeura — Claude Operating Notes
 
-## Active branch
-- `fips/package-v1` — Option A: Rust-only FIPS lane.
-- Python tooling is OUTSIDE the FIPS cryptographic module boundary.
-- R1 is feature-frozen per `docs/product/R1_FEATURE_FREEZE.md`.
+## Current state (post-HMAC sprint, 2026-05-30)
+
+- **Working branch:** `fips/hmac-integrity` (HMAC software integrity sprint)
+- **Public main:** `origin/main` is behind local; see "Public repo" below.
+- **R1 status:** engineering work complete. Remaining P0 is CST-lab ACVP
+  session (an external lab engagement, not engineering work).
+- **Authoritative reproducibility lane:** Docker / GitHub Actions HostB.
+  Local Windows development is not authoritative due to Application Control
+  blocking generated test binaries.
+
+## Toolchain and reproducibility
+
+- **Rust:** 1.93.1 — pinned in three places (Dockerfile `ARG RUST_VERSION`,
+  Dockerfile `ENV RUSTUP_TOOLCHAIN`, repo `rust-toolchain.toml`). Do not
+  change without rebaselining Gate 1.
+- **liboqs:** 0.10.1, built from source per Dockerfile.
+- **Line endings:** LF, enforced repo-wide by `.gitattributes`. Do not change.
+- **Gate 1 anchor:** see `fips/gate1_golden.md` for current hashes. Gate 1
+  is now a two-artifact bundle (`libandna_ffi.so` + `libandna_ffi.integrity`).
+- **Gate 2 anchor:** `verification_digest = 85f4dc18777bc2122cf671dce6c2d69d92c80b5d0dbd78a83a644afa1159818d`.
+  This is locked and toolchain-independent. Any code change that alters this
+  value is a deliberate semantic change requiring an ADR.
 
 ## Do NOT
+
 - Wire Python into the FIPS cryptographic module boundary.
-- Change the Docker Rust version (currently 1.76.0). Local toolchain
-  is 1.93.1; this split is intentional. Determinism claims apply
-  only inside the pinned Docker lane.
-- Regenerate the Gate 1 golden hash without an explicit decision to do so.
-  Current hash: `231778903c6c2c345d3eaba423800bc7ec3edb42750518034f083cba40a2ecef`
 - Change protocol constants in `crates/contracts/src/lib.rs`.
+- Change the Gate 2 `verification_digest` without an explicit ADR.
 - Add zero-knowledge features. ZK is future research, not R1.
-- Claim FIPS complete. P0 blockers remain:
-  1. Replace `fips-integrity-stub` with real HMAC-SHA-256 software integrity.
-  2. Replace self-generated ML-DSA-44 KATs with official NIST ACVP sigVer vectors.
+- Use the `fips-integrity-stub` feature in any release artifact. The stub
+  is development-only; release lanes use `fips-integrity-hmac`.
+- Use the `stub` mldsa44 backend in any release artifact.
 - Broaden R1 product scope or add new SKUs.
 
-## R1 proof-pack regression test (gold-standard regression check)
-After any change to crypto-facing code, run:
+## Build commands (MSYS2 MinGW64, where liboqs is installed)
+
+Development (stub integrity, fast iteration):
 ```bash
-# In MSYS2 MinGW64:
+cargo test -p andna-ffi \
+  --features "oqs-backend fips-integrity-stub fips-kat-vectors-embedded"
+```
+
+Release / FIPS lane (real HMAC integrity):
+```bash
+cargo build -p andna-ffi --release \
+  --features "oqs-backend fips-integrity-hmac fips-kat-vectors-embedded"
+
+cargo run -p xtask -- write-integrity-reference \
+  target/release/libandna_ffi.so \
+  target/release/libandna_ffi.integrity
+```
+
+The HMAC release lane requires both artifacts to ship together, with
+`ANDNA_INTEGRITY_MODULE_PATH` and `ANDNA_INTEGRITY_REF_PATH` set at
+runtime. See `fips/security_policy_draft.md` for the trust-boundary
+implications.
+
+## R1 proof-pack regression (run after any crypto-facing change)
+
+```bash
 rm -f verification_log.json andna_audit.jsonl audit_validate.json tampered_frame.bin
 rm -rf evidence hostb_out
 
 ./target/release/andna verify demo/fixtures/sample_frame.bin
 ./target/release/andna tamper demo/fixtures/sample_frame.bin tampered_frame.bin
-./target/release/andna verify tampered_frame.bin
+{ ./target/release/andna verify tampered_frame.bin || true; }
 ./target/release/andna replay verification_log.json --frame demo/fixtures/sample_frame.bin
 ./target/release/andna export evidence
 ```
-Expected `verification_digest` (NEVER change without deliberate version bump):
-`85f4dc18777bc2122cf671dce6c2d69d92c80b5d0dbd78a83a644afa1159818d`
 
-### Note on exit codes
-`andna verify <tampered_file>` returns exit code 1 (REJECT is expected in
-the proof flow). When chaining with `&&`, wrap the tampered-verify step:
-```bash
-{ ./target/release/andna verify tampered_frame.bin || true; }
-```
-Without this, the `&&` chain truncates before `replay` and `export` run,
-so the `verification_digest` is never printed.
+Verify `verification_digest` matches the Gate 2 value above. The `|| true`
+wrapper on the tampered verify is required because REJECT returns exit
+code 1, which would otherwise break the `&&` chain.
 
-## Terminal split
-- `cargo` commands → MSYS2 MinGW64 (where liboqs is installed).
-- `Select-String` and most git operations → PowerShell or either.
-- Do not use Docker terminals directly for development; Docker is the
-  authoritative reproducibility lane, not an interactive shell.
-
-## Build/test commands (MSYS2)
-```bash
-cargo build -p ffi-cli --release \
-  --features "oqs-backend fips-integrity-stub fips-kat-vectors-embedded"
-
-cargo test -p andna-ffi \
-  --features "oqs-backend fips-integrity-stub fips-kat-vectors-embedded"
-
-cargo test -p andna-audit
-```
-
-## Line endings
-The repo uses LF. If `git status` shows phantom modifications with a
-"LF will be replaced by CRLF" warning, revert with
-`git checkout -- <file>`. Don't fight Windows line-ending conversion;
-fix `core.autocrlf` or add `.gitattributes` later as a separate task.
-
-## Files that should never appear in `git status` as modified
+## Files that should never appear as modified in `git status`
 unless deliberately changed:
-- `include/andna_vnext_contracts.h` — auto-generated from `contracts_codegen`
-- `include/andna_core.h` — auto-generated by cbindgen (manual edits permitted
-  only when local codegen is blocked; reconcile from Docker codegen later)
+- `include/andna_vnext_contracts.h` — auto-generated by `contracts_codegen`
+- `include/andna_core.h` — auto-generated by cbindgen
 - Anything under `target/`, `evidence/`, `hostb_out/`
 
+## Public repo (`origin/main`)
+
+`origin/main` currently lags local by ~2 weeks (as of 2026-05-30).
+Recent sprint work — ACVP KAT swap, toolchain consolidation, cross-host
+LF fix, HMAC software integrity — is on `fips/hmac-integrity` and not
+yet on public main. Coordinate any public push with a doc-convergence
+review pass; do not push individual feature branches without consolidating.
+
 ## Commit message conventions
-Use Conventional Commits: `type(scope): summary`. Common types in this repo:
-- `test(audit)`, `fix(fips)`, `chore(repo)`, `docs(fips)`, `feat(...)`
+
+Conventional Commits: `type(scope): summary`. Common types in this repo:
+- `feat(fips)`, `test(fips)`, `build(fips)`, `ci(fips)` — FIPS package work
+- `docs(fips)` — FIPS documentation updates
+- `fix(repro)`, `build(repro)` — reproducibility lane work
+- `chore(repo)` — repo hygiene, cleanup
