@@ -13,6 +13,7 @@ members = [
     "crates/audit",
     "crates/andna-r2",
     "crates/pipeline",
+    "crates/andna-seal",
 ]
 
 [workspace.package]
