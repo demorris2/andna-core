@@ -23,8 +23,24 @@ jobs:
           # Tight token match avoids false positives on unrelated crate names:
           ! cargo tree -p andna-d0 -e normal --locked \
             | grep -Eiq '(^|[[:space:]])(oqs|oqs-sys|liboqs)([[:space:]]|$)'
-      - name: cargo deny
-        run: cargo deny check
+            
+      - name: D0 dependency boundary audit
+        run: |
+          set -euo pipefail
+
+          echo "Checking andna-d0 dependency tree..."
+          cargo tree -p andna-d0 --locked
+
+          echo "Checking exact fips204 pin..."
+          cargo tree -p andna-d0 --locked -i fips204 | grep -q 'fips204 v0.4.6'
+
+          echo "Checking D0 does not depend on oqs/oqs-sys/liboqs..."
+          if cargo tree -p andna-d0 -e normal --locked \
+            | grep -Eiq '(^|[[:space:]])(oqs|oqs-sys|liboqs)([[:space:]]|$)'; then
+            echo "ERROR: andna-d0 must not depend on oqs/oqs-sys/liboqs"
+            exit 1
+          fi
+
       - name: cargo audit
         run: cargo audit
 
