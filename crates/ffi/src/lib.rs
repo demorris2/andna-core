@@ -1624,6 +1624,7 @@ mod tests {
     fn ffi_gen_test_frame_roundtrip() {
         let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         reset_module_state();
+        let _integrity_env = prepare_integrity_env_for_init();
 
         // Must initialize before any guarded FFI call
         let init_rc = andna_init();
@@ -1649,6 +1650,44 @@ mod tests {
     fn reset_module_state() {
         MODULE_STATE.store(STATE_PRE_INIT, Ordering::SeqCst);
     }
+
+    // In the real HMAC integrity lane, andna_init() requires a valid
+    // module/reference pair through ANDNA_INTEGRITY_* env vars. Legacy init
+    // tests that only care about KAT/init behavior still need that valid
+    // software-integrity fixture before calling andna_init().
+    //
+    // The guard removes env vars and temp files on drop, including panic paths.
+    #[cfg(feature = "fips-integrity-hmac")]
+    struct InitIntegrityEnvGuard {
+        module_path: std::path::PathBuf,
+        ref_path: std::path::PathBuf,
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    impl Drop for InitIntegrityEnvGuard {
+        fn drop(&mut self) {
+            std::env::remove_var(ANDNA_INTEGRITY_MODULE_PATH_ENV);
+            std::env::remove_var(ANDNA_INTEGRITY_REF_PATH_ENV);
+            remove_integrity_test_pair(&self.module_path, &self.ref_path);
+        }
+    }
+
+    #[cfg(feature = "fips-integrity-hmac")]
+    fn prepare_integrity_env_for_init() -> InitIntegrityEnvGuard {
+        let artifact = b"andna runtime integrity artifact bytes";
+        let (module_path, ref_path) = write_integrity_test_pair(artifact);
+
+        std::env::set_var(ANDNA_INTEGRITY_MODULE_PATH_ENV, &module_path);
+        std::env::set_var(ANDNA_INTEGRITY_REF_PATH_ENV, &ref_path);
+
+        InitIntegrityEnvGuard {
+            module_path,
+            ref_path,
+        }
+    }
+
+    #[cfg(not(feature = "fips-integrity-hmac"))]
+    fn prepare_integrity_env_for_init() {}
 
     /// Without init, all four cryptographic functions must return Internal.
     /// This validates that require_approved!() fires before any crypto work.
@@ -1753,6 +1792,8 @@ mod tests {
     fn ffi_init_succeeds_with_real_kat_vectors() {
         let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         reset_module_state();
+        let _integrity_env = prepare_integrity_env_for_init();
+
         assert_eq!(andna_init(), AndnaErr::Ok);
         assert_eq!(MODULE_STATE.load(Ordering::Relaxed), STATE_APPROVED);
 
