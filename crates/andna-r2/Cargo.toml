@@ -3,12 +3,27 @@ name = "andna-r2"
 version = "0.1.0"
 edition = "2021"
 publish = false
+# No `license` field: this is a private workspace crate (publish = false). A valid-SPDX
+# proprietary marker (e.g. LicenseRef-*) is a workspace-wide decision for the
+# `ci/cargo-deny-policy-cleanup` branch — see notes on the deny.toml fix. Avoiding the
+# invalid `license = "Proprietary"` string here keeps this crate from adding another SPDX
+# parse error to that cleanup.
+
+# R2 — Local Policy / Authorization (Stage 2).
+#
+# A PURE policy engine: it consumes the facts R1 (Stage 1) has already cryptographically
+# confirmed about an ACCEPTED frame and decides AUTHORIZED / NOT_AUTHORIZED / NOT_EVALUATED
+# against a local device registry. It NEVER verifies signatures and NEVER calls R1, so it
+# carries no liboqs/oqs dependency and is fully unit-testable without the crypto backend.
+#
+# Isolation invariant (to be enforced in CI like andna-d0): `cargo tree -p andna-r2` must
+# contain NO `oqs` / `oqs-sys`.
 
 [dependencies]
 andna-contracts = { path = "../contracts" }
 sha3 = "0.10"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 hex = "0.4"
 
 [features]

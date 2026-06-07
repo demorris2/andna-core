@@ -12,6 +12,7 @@ members = [
     "xtask",
     "crates/audit",
     "crates/andna-r2",
+    "crates/pipeline",
 ]
 
 [workspace.package]
@@ -28,6 +29,8 @@ andna-codec     = { path = "crates/codec" }
 andna-transcript = { path = "crates/transcript" }
 andna-mldsa44   = { path = "crates/mldsa44", default-features = false }
 andna-core      = { path = "crates/core", default-features = false }
+andna-r2       = { path = "crates/andna-r2" }
+andna-pipeline = { path = "crates/pipeline", default-features = false }
 
 # External
 sha3     = "0.10"
