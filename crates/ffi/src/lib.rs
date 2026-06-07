@@ -21,18 +21,16 @@ use hmac::{Hmac, Mac};
 #[cfg(feature = "fips-integrity-hmac")]
 use sha2::{Digest, Sha256};
 #[cfg(feature = "fips-integrity-hmac")]
-use subtle::ConstantTimeEq;
-#[cfg(feature = "fips-integrity-hmac")]
 use std::path::Path;
+#[cfg(feature = "fips-integrity-hmac")]
+use subtle::ConstantTimeEq;
 
 // ── FIPS software-integrity mode: exactly one must be selected ──────────────
 // fips-integrity-stub: development shim (STUB / NON-CONFORMANT), always passes.
 // fips-integrity-hmac: real HMAC-SHA-256 software integrity check (Path A').
 // These are mutually exclusive and one must be present, enforced at build time.
 #[cfg(all(feature = "fips-integrity-stub", feature = "fips-integrity-hmac"))]
-compile_error!(
-    "Choose either 'fips-integrity-stub' or 'fips-integrity-hmac', not both."
-);
+compile_error!("Choose either 'fips-integrity-stub' or 'fips-integrity-hmac', not both.");
 #[cfg(all(
     not(feature = "fips-integrity-stub"),
     not(feature = "fips-integrity-hmac")
@@ -781,10 +779,8 @@ const HMAC_SHA256_CAST_MSG: &[u8] = b"Hi There";
 
 #[cfg(feature = "fips-integrity-hmac")]
 const HMAC_SHA256_CAST_TAG: [u8; 32] = [
-    0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53,
-    0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b, 0xf1, 0x2b,
-    0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7,
-    0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7,
+    0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53, 0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b, 0xf1, 0x2b,
+    0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7, 0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7,
 ];
 
 #[cfg(feature = "fips-integrity-hmac")]
@@ -994,7 +990,10 @@ fn parse_integrity_reference(input: &str) -> Option<IntegrityReference> {
 }
 
 #[cfg(feature = "fips-integrity-hmac")]
-fn verify_integrity_reference_for_bytes(reference: &IntegrityReference, artifact_bytes: &[u8]) -> bool {
+fn verify_integrity_reference_for_bytes(
+    reference: &IntegrityReference,
+    artifact_bytes: &[u8],
+) -> bool {
     let artifact_sha256 = sha256_bytes(artifact_bytes);
     if !constant_time_eq_32(&artifact_sha256, &reference.artifact_sha256) {
         return false;
@@ -1112,7 +1111,7 @@ pub extern "C" fn andna_init() -> AndnaErr {
         }
     }
 
-        // ── Self-test sequence ─────────────────────────────────────────────────
+    // ── Self-test sequence ─────────────────────────────────────────────────
     // Each test transitions to ERROR on failure (sticky — no recovery without
     // module reload).
 
@@ -1635,7 +1634,12 @@ mod tests {
         assert_eq!(rc, AndnaErr::Ok, "gen_test_frame failed with code {:?}", rc);
 
         let vrc = unsafe { andna_verify_frame_v2(buf.as_ptr(), buf.len()) };
-        assert_eq!(vrc, AndnaErr::Ok, "verify rejected gen'd frame with code {:?}", vrc);
+        assert_eq!(
+            vrc,
+            AndnaErr::Ok,
+            "verify rejected gen'd frame with code {:?}",
+            vrc
+        );
     }
 
     // ── andna_init tests ───────────────────────────────────────────────────
@@ -1660,9 +1664,12 @@ mod tests {
         unsafe {
             assert_eq!(
                 andna_verify_vnext(
-                    mu.as_ptr(), MU_PRE_LEN,
-                    te.as_ptr(), TE_LEN,
-                    sig.as_ptr(), SIG_LEN,
+                    mu.as_ptr(),
+                    MU_PRE_LEN,
+                    te.as_ptr(),
+                    TE_LEN,
+                    sig.as_ptr(),
+                    SIG_LEN,
                 ),
                 AndnaErr::Internal,
                 "andna_verify_vnext should return Internal before init"
@@ -1686,7 +1693,8 @@ mod tests {
         unsafe {
             assert_eq!(
                 andna_parse_mu_pre_header(
-                    mu.as_ptr(), MU_PRE_LEN,
+                    mu.as_ptr(),
+                    MU_PRE_LEN,
                     id32.as_mut_ptr(),
                     &mut epoch as *mut u64,
                     sid.as_mut_ptr(),
@@ -1718,9 +1726,12 @@ mod tests {
         unsafe {
             // Null pointer must return Length even when not initialized.
             let r = andna_verify_vnext(
-                core::ptr::null(), MU_PRE_LEN,
-                core::ptr::null(), TE_LEN,
-                core::ptr::null(), SIG_LEN,
+                core::ptr::null(),
+                MU_PRE_LEN,
+                core::ptr::null(),
+                TE_LEN,
+                core::ptr::null(),
+                SIG_LEN,
             );
             assert_eq!(r, AndnaErr::Length);
 
@@ -1761,8 +1772,8 @@ mod tests {
     #[cfg(feature = "oqs-backend")]
     #[test]
     fn kat_vector_gen() {
-        let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
-            .expect("ML-DSA-44 scheme init failed");
+        let scheme =
+            oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44).expect("ML-DSA-44 scheme init failed");
         let (pk, sk) = scheme.keypair().expect("keypair gen failed");
 
         let msg = [0u8; 64]; // KAT_MSG — always zeros
@@ -1780,21 +1791,25 @@ mod tests {
         println!("\n=== ML-DSA-44 KAT VECTORS — copy into lib.rs ===");
         print!("const KAT_PK: [u8; 1312] = [");
         for (i, b) in pk_bytes.iter().enumerate() {
-            if i > 0 { print!(", "); }
+            if i > 0 {
+                print!(", ");
+            }
             print!("0x{:02x}", b);
         }
         println!("];");
 
         print!("const KAT_SIG: [u8; {}] = [", SIG_LEN);
         for (i, b) in sig_bytes.iter().enumerate() {
-            if i > 0 { print!(", "); }
+            if i > 0 {
+                print!(", ");
+            }
             print!("0x{:02x}", b);
         }
         println!("];");
         println!("=== END KAT VECTORS ===\n");
     }
 
-        #[cfg(feature = "fips-integrity-hmac")]
+    #[cfg(feature = "fips-integrity-hmac")]
     #[test]
     fn hmac_sha256_cast_accepts_rfc4231_vector() {
         assert!(
@@ -1823,8 +1838,7 @@ mod tests {
         );
     }
 
-    
-        #[cfg(feature = "fips-integrity-hmac")]
+    #[cfg(feature = "fips-integrity-hmac")]
     fn to_hex32(bytes: &[u8; 32]) -> String {
         const HEX: &[u8; 16] = b"0123456789abcdef";
         let mut out = String::with_capacity(64);
@@ -1864,8 +1878,8 @@ mod tests {
         let artifact = b"andna test artifact bytes";
         let text = sample_integrity_reference_for_bytes(artifact);
 
-        let parsed = parse_integrity_reference(&text)
-            .expect("valid integrity reference should parse");
+        let parsed =
+            parse_integrity_reference(&text).expect("valid integrity reference should parse");
 
         assert_eq!(parsed.artifact, ANDNA_INTEGRITY_ARTIFACT);
         assert_eq!(parsed.algorithm, ANDNA_INTEGRITY_ALGORITHM);
@@ -1904,8 +1918,7 @@ mod tests {
     #[test]
     fn integrity_reference_rejects_bad_hex_lengths() {
         let artifact = b"andna test artifact bytes";
-        let text = sample_integrity_reference_for_bytes(artifact)
-            .replace("tag_hex=", "tag_hex=00");
+        let text = sample_integrity_reference_for_bytes(artifact).replace("tag_hex=", "tag_hex=00");
 
         assert!(
             parse_integrity_reference(&text).is_none(),
@@ -1919,8 +1932,8 @@ mod tests {
         let artifact = b"andna test artifact bytes";
         let text = sample_integrity_reference_for_bytes(artifact);
 
-        let parsed = parse_integrity_reference(&text)
-            .expect("valid integrity reference should parse");
+        let parsed =
+            parse_integrity_reference(&text).expect("valid integrity reference should parse");
 
         let mut tampered = artifact.to_vec();
         tampered[0] ^= 0x01;
@@ -1960,17 +1973,14 @@ mod tests {
         assert!(decode_hex32(lower).is_some());
     }
 
-        #[cfg(feature = "fips-integrity-hmac")]
+    #[cfg(feature = "fips-integrity-hmac")]
     fn unique_integrity_test_path(name: &str) -> std::path::PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
 
-        std::env::temp_dir().join(format!(
-            "andna-{name}-{}-{nanos}",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("andna-{name}-{}-{nanos}", std::process::id()))
     }
 
     #[cfg(feature = "fips-integrity-hmac")]
@@ -1982,10 +1992,8 @@ mod tests {
 
         let reference = sample_integrity_reference_for_bytes(artifact_bytes);
 
-        std::fs::write(&module_path, artifact_bytes)
-            .expect("should write module test file");
-        std::fs::write(&ref_path, reference)
-            .expect("should write integrity reference test file");
+        std::fs::write(&module_path, artifact_bytes).expect("should write module test file");
+        std::fs::write(&ref_path, reference).expect("should write integrity reference test file");
 
         (module_path, ref_path)
     }
@@ -2018,8 +2026,7 @@ mod tests {
 
         let mut tampered = artifact.to_vec();
         tampered[0] ^= 0x01;
-        std::fs::write(&module_path, tampered)
-            .expect("should write tampered module test file");
+        std::fs::write(&module_path, tampered).expect("should write tampered module test file");
 
         assert!(
             !verify_software_integrity_from_paths(&module_path, &ref_path),
@@ -2035,13 +2042,11 @@ mod tests {
         let artifact = b"andna runtime integrity artifact bytes";
         let (module_path, ref_path) = write_integrity_test_pair(artifact);
 
-        let mut reference = std::fs::read_to_string(&ref_path)
-            .expect("should read reference file");
+        let mut reference = std::fs::read_to_string(&ref_path).expect("should read reference file");
 
         reference = reference.replace("algorithm=HMAC-SHA-256", "algorithm=SHA-256");
 
-        std::fs::write(&ref_path, reference)
-            .expect("should write tampered reference file");
+        std::fs::write(&ref_path, reference).expect("should write tampered reference file");
 
         assert!(
             !verify_software_integrity_from_paths(&module_path, &ref_path),

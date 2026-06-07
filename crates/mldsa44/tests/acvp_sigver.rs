@@ -70,8 +70,8 @@ mod acvp {
         }
 
         oqs::init();
-        let scheme = oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44)
-            .expect("ML-DSA-44 unavailable");
+        let scheme =
+            oqs::sig::Sig::new(oqs::sig::Algorithm::MlDsa44).expect("ML-DSA-44 unavailable");
 
         let mut pass = 0u32;
         let mut fail = 0u32;
@@ -94,8 +94,7 @@ mod acvp {
                 }
             };
 
-            let result =
-                scheme.verify_with_ctx_str(&v.message, sig_ref, &v.context, pk_ref);
+            let result = scheme.verify_with_ctx_str(&v.message, sig_ref, &v.context, pk_ref);
             let got_pass = result.is_ok();
 
             if got_pass != v.expected {
@@ -109,7 +108,11 @@ mod acvp {
             }
         }
 
-        eprintln!("\nACVP ML-DSA-44 sigVer (external/pure): {}/{} passed", pass, pass + fail);
+        eprintln!(
+            "\nACVP ML-DSA-44 sigVer (external/pure): {}/{} passed",
+            pass,
+            pass + fail
+        );
         assert_eq!(fail, 0, "{} ACVP vector(s) failed", fail);
     }
 

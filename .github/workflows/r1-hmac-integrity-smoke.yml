@@ -1,0 +1,67 @@
+name: r1-hmac-integrity-smoke
+
+# Proves the existing R1 HMAC-SHA-256 software-integrity path (Path A') end-to-end on
+# every change, WITHOUT touching the frozen, golden-hash-anchored module source. This
+# is the CI enforcement decided in place of consolidating the generator/verifier
+# constants: if the xtask generator and the ffi verifier ever drift (different key /
+# key_id / format), the "valid pair" case below fails closed and this job goes red.
+#
+# Scope: proves the integrity PATH (accept + fail-closed behavior). It does NOT prove
+# the reproducible golden hash — that is Gate 1 (hostb_rust_proof.yml / gate1_golden.md).
+
+on:
+  push:
+    paths:
+      - "crates/**"
+      - "xtask/**"
+      - "scripts/smoke_hmac_integrity.py"
+      - ".github/workflows/r1-hmac-integrity-smoke.yml"
+  pull_request:
+    paths:
+      - "crates/**"
+      - "xtask/**"
+      - "scripts/smoke_hmac_integrity.py"
+      - ".github/workflows/r1-hmac-integrity-smoke.yml"
+
+jobs:
+  hmac-integrity-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        # rust-toolchain.toml at the repo root pins the actual version (1.93.1); cargo
+        # auto-selects it for builds in this tree. Exact version is not load-bearing for
+        # this job (it proves behavior, not the reproducible hash).
+
+      - name: System deps (oqs-sys builds liboqs via cmake; bindgen needs libclang)
+        run: sudo apt-get update && sudo apt-get install -y cmake clang libclang-dev
+
+      # Approved-Mode feature set per fips/build_manifest.json:
+      #   required:   oqs-backend, fips-integrity-hmac, fips-kat-vectors-embedded
+      #   prohibited: stub, fips-integrity-stub        (intentionally NOT passed)
+      # The crate-root compile_error! gates already reject stub+hmac together and the
+      # no-mode case; this job exercises the real HMAC lane only.
+      - name: Build R1 module (Approved-Mode feature set, fips-integrity-hmac)
+        run: |
+          cargo build -p andna-ffi --release --locked \
+            --features "oqs-backend fips-integrity-hmac fips-kat-vectors-embedded"
+
+      - name: Generate ANDNA-INTEGRITY-v1 reference (xtask write-integrity-reference)
+        run: |
+          cargo run -p xtask -- write-integrity-reference \
+            target/release/libandna_ffi.so target/release/libandna_ffi.integrity
+
+      - name: Record bundle hashes (evidence in the CI log)
+        run: sha256sum target/release/libandna_ffi.so target/release/libandna_ffi.integrity
+
+      # The smoke test runs each case in a fresh subprocess (andna_init is sticky) and
+      # exits non-zero if any case's rc != expected. It asserts all four:
+      #   valid module/reference pair  -> rc=0   (ANDNA_ERR_OK,       Approved Mode)
+      #   missing env paths            -> rc=100 (ANDNA_ERR_INTERNAL, fail-closed)
+      #   tampered module bytes        -> rc=100 (fail-closed)
+      #   tampered reference           -> rc=100 (fail-closed)
+      - name: HMAC software-integrity smoke test (accept + 3 fail-closed cases)
+        run: |
+          python3 scripts/smoke_hmac_integrity.py \
+            target/release/libandna_ffi.so target/release/libandna_ffi.integrity
