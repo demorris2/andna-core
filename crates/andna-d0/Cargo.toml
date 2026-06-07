@@ -1,0 +1,38 @@
+[package]
+name = "andna-d0"
+version = "0.3.0"
+edition.workspace = true
+license.workspace = true
+publish = false   # project convention: no accidental crate publish
+
+[dependencies]
+# Shared interface constants (T_E / mu_pre / sig layout). Real dir: crates/contracts.
+andna-contracts = { workspace = true }
+sha3    = { workspace = true }
+zeroize = { workspace = true }
+
+# D0 seeded ML-DSA-44 KeyGen_internal(xi_E) bridge.
+#   Official algorithm : FIPS 204 ML-DSA (ML-DSA-44).
+#   Implementation     : `fips204` crate — a PINNED IMPLEMENTATION CANDIDATE,
+#                        not official NIST software.
+#   Validation status  : NOT claimed as FIPS 140-3 / CAVP validated.
+#   Use                : D0 seeded keygen ONLY.
+# Exact pin (=0.4.6) lives in [workspace.dependencies]; avoids silent API/behavior
+# drift across 0.4.x. R1 signature VERIFICATION stays isolated on liboqs/oqs-sys in
+# andna-mldsa44 / andna-core, which do NOT depend on andna-d0 (dual-backend isolation).
+fips204 = { workspace = true }
+
+[features]
+default = []
+
+# Exposes intermediate-secret derivations (Seed_E, xi_from_seed), secret-record
+# serialization, and the P_0 / device_id16 test fixtures for KAT regeneration and the
+# cross-backend interop test. These EXPOSE real derivations — never a fake/stub backend.
+# OFF by default; a production build MUST NOT enable this unless the release profile approves.
+d0-test-vectors = []
+
+# RESERVED. Connectivity-healed / counter-bound ratchet mode (Architecture Attack A
+# mitigation). NOT implemented: v0.3 defines the deterministic (all-zero healing) mode
+# only. Enabling this feature is a hard `compile_error!` (see lib.rs) until the mode is
+# specified and analyzed — it must never compile to a silent placeholder.
+d0-connected-healing = []
