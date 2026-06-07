@@ -11,6 +11,7 @@ members = [
     "ffi_cli",
     "xtask",
     "crates/audit",
+    "crates/andna-r2",
 ]
 
 [workspace.package]

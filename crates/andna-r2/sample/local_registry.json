@@ -1,0 +1,19 @@
+{
+  "snapshot_seq": 1,
+  "as_of_unix_ms": 1700000000000,
+  "policy_version": "andna-r2-registry-v0",
+  "entries": [
+    {
+      "device_id16_hex": "11111111111111111111111111111111",
+      "device_id32_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+      "authorized_te_hashes_hex": [
+        "33333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333"
+      ],
+      "current_epoch": 7,
+      "revoked": false,
+      "frozen": false,
+      "recovery_hold": false,
+      "policy_version": "device-policy-v0"
+    }
+  ]
+}
