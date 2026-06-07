@@ -25,11 +25,11 @@
 //! ## ML-DSA-44 backend — validation status
 //!   * Official algorithm : FIPS 204 ML-DSA.
 //!   * Implementation     : `fips204` crate, pinned `=0.4.6` (implementation
-//!                          candidate — NOT official NIST software).
+//!     candidate — NOT official NIST software).
 //!   * Validation status  : NOT claimed as FIPS 140-3 / CAVP validated.
 //!   * Use                : D0 seeded keygen bridge only ([`mldsa`]).
 //!   * R1 evidence path   : unchanged liboqs/oqs-sys verifier, in its own crate,
-//!                          with no dependency on `andna-d0`.
+//!     with no dependency on `andna-d0`.
 //!
 //! ## Secret-key lifecycle (software vs hardware profile)
 //! `fips204`'s `PrivateKey` drop-zeroization is not independently confirmed here, so

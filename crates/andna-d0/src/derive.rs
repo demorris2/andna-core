@@ -239,12 +239,8 @@ fn ratchet_step(
 ) -> SecretState {
     let mut sr = state_record(state.coeffs());
     let epoch_le = epoch.to_le_bytes();
-    let next = sample_coeffs_from_parts(&[
-        RATCHET_STATE_DOMAIN,
-        &epoch_le[..],
-        &healing[..],
-        &sr[..],
-    ]);
+    let next =
+        sample_coeffs_from_parts(&[RATCHET_STATE_DOMAIN, &epoch_le[..], &healing[..], &sr[..]]);
     sr.zeroize();
     SecretState { coeffs: next }
 }
@@ -319,7 +315,11 @@ pub mod test_vectors {
     pub fn derive_xi(state: &SecretState, ctx: &D0Context) -> Zeroizing<[u8; 32]> {
         super::derive_xi(state, ctx)
     }
-    pub fn seed_e(state: &SecretState, epoch: u64, device_id16: &[u8; DEVICE_ID16_LEN]) -> [u8; 32] {
+    pub fn seed_e(
+        state: &SecretState,
+        epoch: u64,
+        device_id16: &[u8; DEVICE_ID16_LEN],
+    ) -> [u8; 32] {
         super::seed_e(state, epoch, device_id16)
     }
     pub fn xi_from_seed(seed: &[u8; 32]) -> [u8; 32] {
@@ -426,7 +426,10 @@ mod kat {
             to_hex(&seed0),
             "ec4274cf909f43fa2aaf12737a258232887732c72d8f616debc90db9dc3a007f"
         );
-        let ctx0 = D0Context { epoch: 0, device_id16: d };
+        let ctx0 = D0Context {
+            epoch: 0,
+            device_id16: d,
+        };
         assert_eq!(
             to_hex(&derive_xi(&p0, &ctx0)[..]),
             "7c39378612176befb1d556c5f26ace6fc025901ccc651edfcc99c85308e58f54"
@@ -444,7 +447,10 @@ mod kat {
         );
 
         // ---- D0-TV-002: epoch-1 seed ----
-        let ctx1 = D0Context { epoch: 1, device_id16: d };
+        let ctx1 = D0Context {
+            epoch: 1,
+            device_id16: d,
+        };
         assert_eq!(
             to_hex(&derive_xi(&p1, &ctx1)[..]),
             "565b4b95f4a15a97a77d2b1c02bc0d4e60b83386425d4234c3efc0fa64140a88"
@@ -456,7 +462,10 @@ mod kat {
             &p2.coeffs()[0..8],
             &[8004808u32, 8242042, 1693018, 246830, 3116329, 1293217, 3189366, 1737664]
         );
-        let ctx2 = D0Context { epoch: 2, device_id16: d };
+        let ctx2 = D0Context {
+            epoch: 2,
+            device_id16: d,
+        };
         assert_eq!(
             to_hex(&derive_xi(&p2, &ctx2)[..]),
             "980650fffe637472372a89950d59ffefc2e7f7544094a84be58f7403c371d1c6"
@@ -480,10 +489,10 @@ mod kat {
     fn from_coeffs_enforces_range() {
         let mut c = [0u32; D0_P_N];
         c[0] = D0_P_Q; // == q, illegal
-        // SecretState intentionally implements neither Debug nor PartialEq (it holds
-        // secret coefficients; a Debug impl could leak P_E into logs/panics, and
-        // PartialEq invites non-constant-time comparison). So match the error variant
-        // rather than asserting equality on the whole Result.
+                       // SecretState intentionally implements neither Debug nor PartialEq (it holds
+                       // secret coefficients; a Debug impl could leak P_E into logs/panics, and
+                       // PartialEq invites non-constant-time comparison). So match the error variant
+                       // rather than asserting equality on the whole Result.
         assert!(matches!(
             SecretState::from_coeffs(c),
             Err(D0Error::PolyCoeffRange)
@@ -500,7 +509,10 @@ mod kat {
 
         // exact good records validate
         assert_eq!(validate_state_record(&state_record(p0.coeffs())), Ok(()));
-        assert_eq!(validate_epoch_record(&epoch_record(p0.coeffs(), 0, &d)), Ok(()));
+        assert_eq!(
+            validate_epoch_record(&epoch_record(p0.coeffs(), 0, &d)),
+            Ok(())
+        );
 
         // record-length constants are exactly as specified
         assert_eq!(D0_STATE_RECORD_LEN, 1032);
@@ -514,7 +526,10 @@ mod kat {
         );
         let mut too_long = st.to_vec();
         too_long.push(0);
-        assert_eq!(validate_state_record(&too_long), Err(D0Error::StateRecordLength));
+        assert_eq!(
+            validate_state_record(&too_long),
+            Err(D0Error::StateRecordLength)
+        );
 
         // short epoch record rejected
         let ep = epoch_record(p0.coeffs(), 0, &d);
