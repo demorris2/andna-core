@@ -5,19 +5,31 @@ edition.workspace = true
 
 [features]
 default = ["oqs-backend"]
-oqs-backend = ["andna-ffi/oqs-backend"]
-stub = ["andna-ffi/stub"]
+oqs-backend = [
+    "andna-ffi/oqs-backend",
+    "andna-seal/oqs-backend",
+    "andna-pipeline/oqs-backend",
+]
+stub = [
+    "andna-ffi/stub",
+    "andna-seal/stub",
+    "andna-pipeline/stub",
+]
 fips-integrity-stub = ["andna-ffi/fips-integrity-stub"]
+fips-integrity-hmac = ["andna-ffi/fips-integrity-hmac"]
 fips-kat-vectors-embedded = ["andna-ffi/fips-kat-vectors-embedded"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 andna-contracts = { workspace = true }
 andna-ffi = { path = "../crates/ffi", default-features = false }
-sha2 = "0.10"
-serde_json = { workspace = true }
-sha3 = "0.10"
 andna-audit = { version = "0.1.0", path = "../crates/audit" }
+andna-seal = { path = "../crates/andna-seal", default-features = false }
+andna-pipeline = { workspace = true, default-features = false }
+sha2 = "0.10"
+sha3 = "0.10"
+serde_json = { workspace = true }
+hex = { workspace = true }
 
 [[bin]]
 name = "andna"
