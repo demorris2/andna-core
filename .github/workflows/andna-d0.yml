@@ -1,0 +1,83 @@
+name: andna-d0 (procurement-grade gate)
+
+on:
+  push: { paths: ["crates/andna-d0/**", "crates/contracts/**", "crates/core/**", ".github/workflows/andna-d0.yml"] }
+  pull_request: { paths: ["crates/andna-d0/**", "crates/contracts/**", "crates/core/**"] }
+
+jobs:
+  d0:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Supply-chain / provenance gates.
+      - name: Install supply-chain tools
+        run: cargo install cargo-deny cargo-audit --locked
+      - name: Dependency tree — fips204 exact pin + NO liboqs in andna-d0's graph
+        run: |
+          cargo tree -p andna-d0 --locked
+          # fips204 must be the exact pin:
+          cargo tree -p andna-d0 --locked -i fips204 | grep -q 'fips204 v0.4.6'
+          # andna-d0 must NOT depend on any liboqs/oqs-sys crate (dual-backend isolation).
+          # Tight token match avoids false positives on unrelated crate names:
+          ! cargo tree -p andna-d0 -e normal --locked \
+            | grep -Eiq '(^|[[:space:]])(oqs|oqs-sys|liboqs)([[:space:]]|$)'
+            
+      - name: D0 dependency boundary audit
+        run: |
+          set -euo pipefail
+
+          echo "Checking andna-d0 dependency tree..."
+          cargo tree -p andna-d0 --locked
+
+          echo "Checking exact fips204 pin..."
+          cargo tree -p andna-d0 --locked -i fips204 | grep -q 'fips204 v0.4.6'
+
+          echo "Checking D0 does not depend on oqs/oqs-sys/liboqs..."
+          if cargo tree -p andna-d0 -e normal --locked \
+            | grep -Eiq '(^|[[:space:]])(oqs|oqs-sys|liboqs)([[:space:]]|$)'; then
+            echo "ERROR: andna-d0 must not depend on oqs/oqs-sys/liboqs"
+            exit 1
+          fi
+
+      - name: cargo audit
+        run: cargo audit
+
+      # No-stub posture: enabling the reserved healed mode must FAIL the build.
+      - name: Reserved healing feature must NOT compile
+        run: |
+          if cargo build -p andna-d0 --locked --features d0-connected-healing 2>/dev/null; then
+            echo "ERROR: d0-connected-healing compiled; it must be a hard compile_error until specified"; exit 1
+          else
+            echo "OK: d0-connected-healing is gated by compile_error!"
+          fi
+
+      # KAT parity: default build (no review helpers) AND the opt-in test-vector build.
+      - name: Tests (default features — no review helpers)
+        run: cargo test -p andna-d0 --locked --no-default-features
+      - name: Tests (d0-test-vectors exposure)
+        run: cargo test -p andna-d0 --locked --features d0-test-vectors
+
+      # Formatting / lint hygiene — both default and test-vector feature sets.
+      - name: fmt
+        run: cargo fmt -p andna-d0 -- --check
+      - name: clippy (default)
+        run: cargo clippy -p andna-d0 --locked --all-targets -- -D warnings
+      - name: clippy (d0-test-vectors)
+        run: cargo clippy -p andna-d0 --locked --all-targets --features d0-test-vectors -- -D warnings
+
+  # Separate job: builds WITH liboqs and runs the end-to-end D0 -> R1 interop gate.
+  # Kept apart from `d0` so the isolation job's graph stays oqs-free.
+  interop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # oqs-sys builds liboqs from source via cmake and generates bindings via libclang.
+      - name: liboqs build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake clang libclang-dev
+      - name: D0 -> R1 cross-backend interop (fips204 sign -> liboqs verify -> ACCEPT, + tamper rejects)
+        run: |
+          cargo test -p andna-core --locked --features oqs-backend \
+            --test d0_fips204_to_liboqs_r1_interop_accepts -- --nocapture

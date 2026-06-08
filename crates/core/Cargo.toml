@@ -15,5 +15,16 @@ andna-transcript  = { workspace = true }
 andna-mldsa44     = { workspace = true, default-features = false }
 zeroize           = { workspace = true }
 
+# Only deps NOT already in [dependencies] need to be added for the interop test.
+# andna-contracts and andna-transcript are regular deps above and are already visible
+# to integration tests — do NOT re-list them here (that caused the duplicate-key error).
 [dev-dependencies]
-oqs = { workspace = true }
+oqs      = { workspace = true }
+andna-d0 = { path = "../andna-d0", features = ["d0-test-vectors"] }
+fips204  = { workspace = true }
+
+# Cross-backend interop gate — only builds with the real verifier backend.
+[[test]]
+name = "d0_fips204_to_liboqs_r1_interop_accepts"
+path = "tests/d0_fips204_to_liboqs_r1_interop_accepts.rs"
+required-features = ["oqs-backend"]
