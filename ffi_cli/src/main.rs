@@ -86,6 +86,47 @@ struct CliRegistryEntry {
     policy_version: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CliSealerProfile {
+    schema_version: String,
+    profile_type: String,
+    seed_hex: String,
+    device_id16_hex: String,
+    epoch: u64,
+    created_at_unix_ms: u64,
+    warning: String,
+}
+
+impl CliSealerProfile {
+    fn to_signer(&self) -> Result<SoftwareProfileSigner, String> {
+        if self.schema_version != "andna-sealer-profile-v0" {
+            return Err(format!(
+                "unsupported sealer profile schema: {}",
+                self.schema_version
+            ));
+        }
+
+        if self.profile_type != "software-profile" {
+            return Err(format!(
+                "unsupported sealer profile type: {}",
+                self.profile_type
+            ));
+        }
+
+        let seed = parse_hex_array::<32>(&self.seed_hex, "profile.seed_hex")?;
+        let device_id16 = parse_hex_array::<TE_DEVICE_ID16_LEN>(
+            &self.device_id16_hex,
+            "profile.device_id16_hex",
+        )?;
+
+        Ok(SoftwareProfileSigner::from_seed(
+            seed,
+            device_id16,
+            self.epoch,
+        ))
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -102,6 +143,7 @@ fn main() {
         "export" => cmd_export(&args[2..]),
         "gen" => cmd_gen(&args[2..]),
         "tamper" => cmd_tamper(&args[2..]),
+        "init-sealer" => cmd_init_sealer(&args[2..]),
         "seal-file" => cmd_seal_file(&args[2..]),
         "verify-file" => cmd_verify_file(&args[2..]),
         // Backward-compatible legacy commands
@@ -142,6 +184,8 @@ fn usage() -> ! {
     eprintln!("    andna replay verification_log.json");
     eprintln!("    andna replay verification_log.json --frame sample_frame.bin");
     eprintln!("    andna export evidence/");
+    eprintln!("    andna init-sealer --profile <profile.json> [--epoch <n>]");
+    eprintln!("    andna seal-file <file> --profile <profile.json> --out <seal.json> [--content-type <mime>] [--registry-out <registry.json>]");
     eprintln!("    andna seal-file <file> --out <seal.json> --seed-hex <64hex> --device-id16-hex <32hex> [--epoch <n>] [--content-type <mime>] [--registry-out <registry.json>]");
     eprintln!("    andna verify-file <file> --seal <seal.json> --registry <registry.json> [--evidence-out <result.json>]");
     eprintln!("    andna seal-file sample.txt --out sample.txt.andna-seal.json --seed-hex <64hex> --device-id16-hex <32hex> --epoch 7 --registry-out sample.registry.json");
@@ -519,25 +563,9 @@ fn cmd_tamper(args: &[String]) -> i32 {
     0
 }
 
-fn cmd_seal_file(args: &[String]) -> i32 {
-    if args.is_empty() {
-        usage();
-    }
-
-    let input = Path::new(&args[0]);
-
-    let Some(out_path) = opt_value(args, "--out") else {
-        eprintln!("error: seal-file requires --out <seal.json>");
-        return 2;
-    };
-
-    let Some(seed_hex) = opt_value(args, "--seed-hex") else {
-        eprintln!("error: seal-file requires --seed-hex <64 hex chars>");
-        return 2;
-    };
-
-    let Some(device_id16_hex) = opt_value(args, "--device-id16-hex") else {
-        eprintln!("error: seal-file requires --device-id16-hex <32 hex chars>");
+fn cmd_init_sealer(args: &[String]) -> i32 {
+    let Some(profile_path) = opt_value(args, "--profile") else {
+        eprintln!("error: init-sealer requires --profile <profile.json>");
         return 2;
     };
 
@@ -552,25 +580,174 @@ fn cmd_seal_file(args: &[String]) -> i32 {
         None => 7,
     };
 
-    let content_type = opt_value(args, "--content-type");
-    let registry_out = opt_value(args, "--registry-out");
-
-    let seed = match parse_hex_array::<32>(&seed_hex, "seed-hex") {
+    let seed = match random_array::<32>() {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: {}", e);
+            eprintln!("error: could not generate seed: {}", e);
             return 2;
         }
     };
 
-    let device_id16 =
-        match parse_hex_array::<TE_DEVICE_ID16_LEN>(&device_id16_hex, "device-id16-hex") {
+    let device_id16 = match random_array::<TE_DEVICE_ID16_LEN>() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: could not generate device_id16: {}", e);
+            return 2;
+        }
+    };
+
+    let profile = CliSealerProfile {
+        schema_version: "andna-sealer-profile-v0".to_string(),
+        profile_type: "software-profile".to_string(),
+        seed_hex: hex::encode(seed),
+        device_id16_hex: hex::encode(device_id16),
+        epoch,
+        created_at_unix_ms: now_unix_ms(),
+        warning: "Software-profile demo credential. Contains signing seed material. Do not commit, share, or use as hardware-backed custody proof.".to_string(),
+    };
+
+    let path = Path::new(&profile_path);
+
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                eprintln!(
+                    "error: cannot create profile directory {}: {}",
+                    parent.display(),
+                    e
+                );
+                return 2;
+            }
+        }
+    }
+
+    let json =
+        serde_json::to_string_pretty(&profile).expect("CLI sealer profile is always serializable");
+
+    if let Err(e) = fs::write(path, json) {
+        eprintln!("error: cannot write profile {}: {}", path.display(), e);
+        return 2;
+    }
+
+    println!("\n════════════════════════════════════════════════════════════");
+    println!("  AN-DNA Software-Profile Sealer Created");
+    println!("════════════════════════════════════════════════════════════");
+    kv(4, "Profile", &path.display().to_string());
+    kv(4, "Profile type", "software-profile");
+    kv(4, "Epoch", &epoch.to_string());
+    println!("────────────────────────────────────────────────────────────");
+    println!("  Warning: profile contains seed material. Do not commit or share.");
+    println!("  Scope: software-profile only; not hardware custody or clone resistance.");
+    println!();
+
+    0
+}
+
+fn cmd_seal_file(args: &[String]) -> i32 {
+    if args.is_empty() {
+        usage();
+    }
+
+    let input = Path::new(&args[0]);
+
+    let Some(out_path) = opt_value(args, "--out") else {
+        eprintln!("error: seal-file requires --out <seal.json>");
+        return 2;
+    };
+
+    let content_type = opt_value(args, "--content-type");
+    let registry_out = opt_value(args, "--registry-out");
+
+    let (signer, signer_source, signer_epoch) = if let Some(profile_path) =
+        opt_value(args, "--profile")
+    {
+        if opt_value(args, "--seed-hex").is_some() || opt_value(args, "--device-id16-hex").is_some()
+        {
+            eprintln!("error: use either --profile or --seed-hex/--device-id16-hex, not both");
+            return 2;
+        }
+
+        if opt_value(args, "--epoch").is_some() {
+            eprintln!("error: --epoch is stored in the sealer profile when --profile is used");
+            return 2;
+        }
+
+        let raw = match fs::read_to_string(&profile_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: cannot read profile {}: {}", profile_path, e);
+                return 2;
+            }
+        };
+
+        let profile: CliSealerProfile = match serde_json::from_str(&raw) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("error: cannot parse profile {}: {}", profile_path, e);
+                return 2;
+            }
+        };
+
+        let epoch = profile.epoch;
+
+        let signer = match profile.to_signer() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: invalid sealer profile {}: {}", profile_path, e);
+                return 2;
+            }
+        };
+
+        (signer, format!("profile: {}", profile_path), epoch)
+    } else {
+        let Some(seed_hex) = opt_value(args, "--seed-hex") else {
+            eprintln!(
+                "error: seal-file requires either --profile <profile.json> or --seed-hex <64 hex chars>"
+            );
+            return 2;
+        };
+
+        let Some(device_id16_hex) = opt_value(args, "--device-id16-hex") else {
+            eprintln!(
+                "error: seal-file requires --device-id16-hex <32 hex chars> when --profile is not used"
+            );
+            return 2;
+        };
+
+        let epoch = match opt_value(args, "--epoch") {
+            Some(s) => match s.parse::<u64>() {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("error: invalid --epoch value {}: {}", s, e);
+                    return 2;
+                }
+            },
+            None => 7,
+        };
+
+        let seed = match parse_hex_array::<32>(&seed_hex, "seed-hex") {
             Ok(v) => v,
             Err(e) => {
                 eprintln!("error: {}", e);
                 return 2;
             }
         };
+
+        let device_id16 =
+            match parse_hex_array::<TE_DEVICE_ID16_LEN>(&device_id16_hex, "device-id16-hex") {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    return 2;
+                }
+            };
+
+        (
+            SoftwareProfileSigner::from_seed(seed, device_id16, epoch),
+            "manual seed/device flags".to_string(),
+            epoch,
+        )
+    };
 
     let file_bytes = match fs::read(input) {
         Ok(b) => b,
@@ -586,7 +763,6 @@ fn cmd_seal_file(args: &[String]) -> i32 {
         .unwrap_or_else(|| input.to_str().unwrap_or("sealed-file"))
         .to_string();
 
-    let signer = SoftwareProfileSigner::from_seed(seed, device_id16, epoch);
     let bundle = seal_file(file_name, &file_bytes, content_type, &signer);
 
     let out = Path::new(&out_path);
@@ -600,6 +776,7 @@ fn cmd_seal_file(args: &[String]) -> i32 {
     println!("════════════════════════════════════════════════════════════");
     kv(4, "Input file", &input.display().to_string());
     kv(4, "Seal sidecar", &out.display().to_string());
+    kv(4, "Signer source", &signer_source);
     kv(
         4,
         "Manifest hash",
@@ -607,7 +784,7 @@ fn cmd_seal_file(args: &[String]) -> i32 {
     );
     kv(4, "File hash", &bundle.manifest.file_hash_hex);
     kv(4, "Frame encoding", &bundle.frame_encoding);
-    kv(4, "Epoch", &epoch.to_string());
+    kv(4, "Epoch", &signer_epoch.to_string());
     println!("────────────────────────────────────────────────────────────");
     println!("  Scope: integrity/authenticity binding only; this does NOT encrypt the file.");
 
@@ -917,6 +1094,12 @@ fn strerror(err: AndnaErr) -> String {
     unsafe { CStr::from_ptr(ptr) }
         .to_string_lossy()
         .into_owned()
+}
+
+fn random_array<const N: usize>() -> Result<[u8; N], String> {
+    let mut out = [0u8; N];
+    getrandom::getrandom(&mut out).map_err(|e| e.to_string())?;
+    Ok(out)
 }
 
 fn compute_verification_digest(records: &[VerificationRecord]) -> String {

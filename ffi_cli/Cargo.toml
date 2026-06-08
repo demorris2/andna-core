@@ -26,6 +26,7 @@ andna-ffi = { path = "../crates/ffi", default-features = false }
 andna-audit = { version = "0.1.0", path = "../crates/audit" }
 andna-seal = { path = "../crates/andna-seal", default-features = false }
 andna-pipeline = { workspace = true, default-features = false }
+getrandom = "0.2"
 sha2 = "0.10"
 sha3 = "0.10"
 serde_json = { workspace = true }

@@ -305,6 +305,7 @@ dependencies = [
  "andna-ffi",
  "andna-pipeline",
  "andna-seal",
+ "getrandom",
  "hex",
  "serde",
  "serde_json",
