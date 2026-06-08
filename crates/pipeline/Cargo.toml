@@ -1,0 +1,38 @@
+[package]
+name = "andna-pipeline"
+version = "0.1.0"
+edition = "2021"
+publish = false
+# No `license` field (private workspace crate, publish = false) — see andna-r2's note and
+# the planned ci/cargo-deny-policy-cleanup branch for the workspace-wide LicenseRef decision.
+
+# R1 + R2 orchestration. This is the ONE crate that legitimately depends on BOTH the liboqs
+# verifier (andna-core, Stage 1) and the pure policy engine (andna-r2, Stage 2). oqs/liboqs
+# re-enters here by design; andna-r2 itself stays backend-free. The feature shape mirrors
+# andna-core so the real verifier is on by default and a stub build is still possible.
+
+[features]
+default = ["oqs-backend"]
+oqs-backend = ["andna-core/oqs-backend"]
+stub = ["andna-core/stub"]
+
+[dependencies]
+andna-contracts = { path = "../contracts" }
+andna-core = { path = "../core", default-features = false }
+andna-r2 = { path = "../andna-r2" }
+andna-audit = { path = "../audit" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+
+[dev-dependencies]
+# End-to-end test builds a real ML-DSA-44 frame (fips204 keygen) and runs it through R1 -> R2.
+# Deliberately does NOT depend on andna-d0: the pipeline's job is the R1->R2 seam and the
+# fail-closed gate; the D0->R1 derivation lineage is proven separately by the interop test.
+# This keeps the pipeline crate self-contained and independent of the D0 crate's location.
+andna-transcript = { path = "../transcript" }
+fips204 = "=0.4.6"
+
+[[test]]
+name = "d0_r1_r2_pipeline"
+required-features = ["oqs-backend"]

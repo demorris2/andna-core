@@ -1,0 +1,33 @@
+[package]
+name = "andna-seal"
+version = "0.1.0"
+edition = "2021"
+publish = false
+# No `license` field (private workspace crate) — see the ci/cargo-deny-policy-cleanup plan.
+
+# File sealing + verification over the AN-DNA frame. Owns ONLY: manifest canonicalization,
+# file hashing, ctx_hash binding, the Signer abstraction, and the seal/verify result types.
+# It reuses the existing pieces and never reimplements a verifier:
+#   andna_codec::pack_frame_v2, andna_pipeline::verify_and_authorize (R1 + R2).
+# Feature shape mirrors the pipeline so the real verifier is on by default.
+
+[features]
+default = ["oqs-backend"]
+oqs-backend = ["andna-pipeline/oqs-backend"]
+stub = ["andna-pipeline/stub"]
+
+[dependencies]
+andna-contracts = { path = "../contracts" }
+andna-codec = { path = "../codec" }
+andna-transcript = { path = "../transcript" }
+andna-pipeline = { path = "../pipeline", default-features = false }
+sha3 = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+zeroize = "1"
+fips204 = "=0.4.6"
+
+[[test]]
+name = "file_seal_verify"
+required-features = ["oqs-backend"]

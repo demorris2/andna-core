@@ -12,6 +12,9 @@ members = [
     "ffi_cli",
     "xtask",
     "crates/audit",
+    "crates/andna-r2",
+    "crates/pipeline",
+    "crates/andna-seal",
 ]
 
 [workspace.package]
@@ -30,6 +33,8 @@ andna-mldsa44   = { path = "crates/mldsa44", default-features = false }
 andna-core      = { path = "crates/core", default-features = false }
 andna-d0 = { path = "crates/andna-d0" }
 fips204  = "=0.4.6"
+andna-r2       = { path = "crates/andna-r2" }
+andna-pipeline = { path = "crates/pipeline", default-features = false }
 
 # External
 sha3     = "0.10"

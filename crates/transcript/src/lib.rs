@@ -181,7 +181,9 @@ pub fn run_shake256_kat() -> bool {
     // ── T0: all-zeros T_E ─────────────────────────────────────────────────
     let t0_input = [0u8; TE_LEN];
     pk_hash_from_te(&t0_input, &mut out);
-    if out != KAT_T0 { return false; }
+    if out != KAT_T0 {
+        return false;
+    }
 
     // ── T1: structured T_E — must match build_kat_t1_te() in tests ────────
     let mut t1_input = [0u8; TE_LEN];
@@ -192,24 +194,23 @@ pub fn run_shake256_kat() -> bool {
     // t1 = 0xAA × 1280 (at TE_T1_OFF)
     t1_input[TE_T1_OFF..TE_T1_OFF + TE_T1_LEN].fill(0xAA);
     // epoch = 5 LE
-    t1_input[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN]
-        .copy_from_slice(&5u64.to_le_bytes());
+    t1_input[TE_EPOCH_OFF..TE_EPOCH_OFF + TE_EPOCH_LEN].copy_from_slice(&5u64.to_le_bytes());
     // device_id16 = 0xBB × 16
     t1_input[TE_DEVICE_ID16_OFF..TE_DEVICE_ID16_OFF + TE_DEVICE_ID16_LEN].fill(0xBB);
     pk_hash_from_te(&t1_input, &mut out);
-    if out != KAT_T1 { return false; }
+    if out != KAT_T1 {
+        return false;
+    }
 
     // ── T2: structured mu_pre — must match build_kat_t2_mu_pre() in tests ─
     // pk_hash field comes from T1 result (captured in `out` above).
     let t1_pk_hash = out;
     let mut t2_input = [0u8; MU_PRE_LEN];
-    t2_input[MU_PRE_PK_HASH_OFF..MU_PRE_PK_HASH_OFF + PK_HASH_LEN]
-        .copy_from_slice(&t1_pk_hash);
+    t2_input[MU_PRE_PK_HASH_OFF..MU_PRE_PK_HASH_OFF + PK_HASH_LEN].copy_from_slice(&t1_pk_hash);
     t2_input[MU_PRE_DOMAIN_SEP_OFF..MU_PRE_DOMAIN_SEP_OFF + DOMAIN_SEP_LEN]
         .copy_from_slice(&DOMAIN_SEP);
     t2_input[MU_PRE_VERSION_OFF] = MU_PRE_VERSION_VAL;
-    t2_input[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN]
-        .fill(0xCC);
+    t2_input[MU_PRE_DEVICE_ID32_OFF..MU_PRE_DEVICE_ID32_OFF + MU_PRE_DEVICE_ID32_LEN].fill(0xCC);
     t2_input[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + MU_PRE_EPOCH_LEN]
         .copy_from_slice(&5u64.to_le_bytes());
     t2_input[MU_PRE_SID_OFF..MU_PRE_SID_OFF + MU_PRE_SID_LEN].fill(0xDD);
@@ -218,7 +219,9 @@ pub fn run_shake256_kat() -> bool {
     t2_input[MU_PRE_CTX_HASH_OFF..MU_PRE_CTX_HASH_OFF + MU_PRE_CTX_HASH_LEN].fill(0x11);
     // policy_hash = 0x00 (already zero from initialization)
     mu_from_mu_pre(&t2_input, &mut out);
-    if out != KAT_T2 { return false; }
+    if out != KAT_T2 {
+        return false;
+    }
 
     true
 }

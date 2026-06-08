@@ -84,6 +84,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "andna-pipeline"
+version = "0.1.0"
+dependencies = [
+ "andna-audit",
+ "andna-contracts",
+ "andna-core",
+ "andna-r2",
+ "andna-transcript",
+ "fips204",
+ "hex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "andna-r2"
+version = "0.1.0"
+dependencies = [
+ "andna-contracts",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha3",
+]
+
+[[package]]
+name = "andna-seal"
+version = "0.1.0"
+dependencies = [
+ "andna-codec",
+ "andna-contracts",
+ "andna-pipeline",
+ "andna-transcript",
+ "fips204",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha3",
+ "zeroize",
+]
+
+[[package]]
 name = "andna-transcript"
 version = "0.1.0"
 dependencies = [

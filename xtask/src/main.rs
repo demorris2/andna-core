@@ -74,7 +74,9 @@ fn print_usage() {
     eprintln!("      Regenerate headers and fail if include/ differs from committed state");
     eprintln!();
     eprintln!("  cargo run -p xtask -- write-integrity-reference <module.so> <out.integrity>");
-    eprintln!("      Generate Path A' HMAC-SHA-256 integrity reference for a compiled module artifact");
+    eprintln!(
+        "      Generate Path A' HMAC-SHA-256 integrity reference for a compiled module artifact"
+    );
 }
 
 fn to_hex32(bytes: &[u8; 32]) -> String {
@@ -107,8 +109,12 @@ fn hmac_sha256_bytes(key: &[u8], bytes: &[u8]) -> [u8; 32] {
 }
 
 fn write_integrity_reference(module_path: &Path, out_path: &Path) -> Result<(), String> {
-    let bytes = fs::read(module_path)
-        .map_err(|e| format!("failed to read module artifact {}: {e}", module_path.display()))?;
+    let bytes = fs::read(module_path).map_err(|e| {
+        format!(
+            "failed to read module artifact {}: {e}",
+            module_path.display()
+        )
+    })?;
 
     let artifact_sha256 = sha256_bytes(&bytes);
     let tag = hmac_sha256_bytes(&ANDNA_INTEGRITY_KEY, &bytes);
@@ -130,8 +136,12 @@ fn write_integrity_reference(module_path: &Path, out_path: &Path) -> Result<(), 
         artifact_sha256_hex = to_hex32(&artifact_sha256),
     );
 
-    fs::write(out_path, reference)
-        .map_err(|e| format!("failed to write integrity reference {}: {e}", out_path.display()))?;
+    fs::write(out_path, reference).map_err(|e| {
+        format!(
+            "failed to write integrity reference {}: {e}",
+            out_path.display()
+        )
+    })?;
 
     println!("Generated integrity reference:");
     println!("  module:          {}", module_path.display());
