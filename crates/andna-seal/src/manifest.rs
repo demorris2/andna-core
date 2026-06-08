@@ -60,12 +60,17 @@ impl Manifest {
     /// Decode the declared file hash to raw bytes (validates algorithm, hex, and width).
     pub fn file_hash(&self) -> Result<[u8; DIGEST_LEN], SealError> {
         if self.digest_algorithm != DIGEST_ALGORITHM {
-            return Err(SealError::UnsupportedDigestAlgorithm(self.digest_algorithm.clone()));
+            return Err(SealError::UnsupportedDigestAlgorithm(
+                self.digest_algorithm.clone(),
+            ));
         }
-        let raw =
-            hex::decode(&self.file_hash_hex).map_err(|e| SealError::BadFileHashHex(e.to_string()))?;
+        let raw = hex::decode(&self.file_hash_hex)
+            .map_err(|e| SealError::BadFileHashHex(e.to_string()))?;
         if raw.len() != DIGEST_LEN {
-            return Err(SealError::FileHashWidth { expected: DIGEST_LEN, got: raw.len() });
+            return Err(SealError::FileHashWidth {
+                expected: DIGEST_LEN,
+                got: raw.len(),
+            });
         }
         let mut out = [0u8; DIGEST_LEN];
         out.copy_from_slice(&raw);
@@ -84,7 +89,10 @@ impl Manifest {
         buf.extend_from_slice(&self.file_size.to_le_bytes());
         lp(&mut buf, self.file_hash_hex.as_bytes());
         lp(&mut buf, self.manifest_policy.as_bytes());
-        lp(&mut buf, self.content_type.as_deref().unwrap_or("").as_bytes());
+        lp(
+            &mut buf,
+            self.content_type.as_deref().unwrap_or("").as_bytes(),
+        );
         buf
     }
 

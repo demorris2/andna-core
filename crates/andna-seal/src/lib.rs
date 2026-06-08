@@ -52,7 +52,9 @@ mod seal;
 mod signer;
 mod verify;
 
-pub use manifest::{Manifest, SealError, DIGEST_ALGORITHM, MANIFEST_POLICY_V0, MANIFEST_SCHEMA_VERSION};
+pub use manifest::{
+    Manifest, SealError, DIGEST_ALGORITHM, MANIFEST_POLICY_V0, MANIFEST_SCHEMA_VERSION,
+};
 pub use seal::{seal_file, SealedBundle, FRAME_ENCODING, SIDECAR_SCHEMA_VERSION};
 pub use signer::{Signer, SoftwareProfileSigner, PK_E_LEN};
 pub use verify::{verify_sealed, SealVerifyResult, Verdict};

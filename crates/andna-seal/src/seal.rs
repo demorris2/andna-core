@@ -81,7 +81,8 @@ fn build_mu_pre(te: &[u8; TE_LEN], manifest_hash: &[u8; MU_PRE_CTX_HASH_LEN]) ->
     andna_transcript::pk_hash_from_te(te, &mut pk_hash);
     mu_pre[MU_PRE_PK_HASH_OFF..MU_PRE_PK_HASH_OFF + PK_HASH_LEN].copy_from_slice(&pk_hash);
 
-    mu_pre[MU_PRE_DOMAIN_SEP_OFF..MU_PRE_DOMAIN_SEP_OFF + DOMAIN_SEP_LEN].copy_from_slice(&DOMAIN_SEP);
+    mu_pre[MU_PRE_DOMAIN_SEP_OFF..MU_PRE_DOMAIN_SEP_OFF + DOMAIN_SEP_LEN]
+        .copy_from_slice(&DOMAIN_SEP);
     mu_pre[MU_PRE_VERSION_OFF] = MU_PRE_VERSION_VAL;
 
     mu_pre[MU_PRE_EPOCH_OFF..MU_PRE_EPOCH_OFF + MU_PRE_EPOCH_LEN]

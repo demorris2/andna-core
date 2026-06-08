@@ -103,7 +103,12 @@ pub fn verify_sealed(
         } else {
             (Verdict::Yes, None)
         };
-        (verdict, detail, Some(hex::encode(manifest_hash)), Some(hex::encode(ctx)))
+        (
+            verdict,
+            detail,
+            Some(hex::encode(manifest_hash)),
+            Some(hex::encode(ctx)),
+        )
     } else {
         (Verdict::NotEvaluated, None, None, None)
     };

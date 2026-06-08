@@ -40,7 +40,11 @@ pub struct SoftwareProfileSigner {
 impl SoftwareProfileSigner {
     /// Create a software-profile signer from a 32-byte seed and a fixed identity/epoch.
     pub fn from_seed(seed: [u8; 32], device_id16: [u8; TE_DEVICE_ID16_LEN], epoch: u64) -> Self {
-        Self { seed: Zeroizing::new(seed), device_id16, epoch }
+        Self {
+            seed: Zeroizing::new(seed),
+            device_id16,
+            epoch,
+        }
     }
 }
 
@@ -56,7 +60,8 @@ impl Signer for SoftwareProfileSigner {
     fn sign(&self, mu: &[u8; MU_LEN]) -> [u8; SIG_LEN] {
         // Re-derive the keypair so the private key's lifetime is confined to this call.
         let (_pk, sk) = KG::keygen_from_seed(&*self.seed);
-        sk.try_sign(mu, &[]).expect("ML-DSA-44 signing over a 64-byte mu cannot fail")
+        sk.try_sign(mu, &[])
+            .expect("ML-DSA-44 signing over a 64-byte mu cannot fail")
     }
 
     fn device_id16(&self) -> [u8; TE_DEVICE_ID16_LEN] {

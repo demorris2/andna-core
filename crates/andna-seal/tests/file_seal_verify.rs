@@ -12,7 +12,9 @@
 
 use andna_contracts::{FRAME_V2_SIG_OFF, TE_DEVICE_ID16_LEN};
 use andna_pipeline::{verified_facts_from_accepted_frame, Registry, RegistryEntry, VerifiedFacts};
-use andna_seal::{seal_file, verify_sealed, Manifest, SealedBundle, SoftwareProfileSigner, Verdict};
+use andna_seal::{
+    seal_file, verify_sealed, Manifest, SealedBundle, SoftwareProfileSigner, Verdict,
+};
 
 // ── seal + verify ──────────────────────────────────────────────────────────────
 
@@ -27,7 +29,10 @@ fn seal_then_verify_authorized() {
     assert_eq!(r.unchanged, Verdict::Yes);
     assert_eq!(r.authorized, Verdict::Yes);
     assert!(r.overall_accept);
-    assert_eq!(r.summary(), "AUTHENTIC: yes | UNCHANGED: yes | AUTHORIZED: yes");
+    assert_eq!(
+        r.summary(),
+        "AUTHENTIC: yes | UNCHANGED: yes | AUTHORIZED: yes"
+    );
     // Frame ctx_hash equals the manifest hash that was bound.
     assert_eq!(r.frame_ctx_hash_hex, r.computed_manifest_hash_hex);
 }
@@ -57,7 +62,10 @@ fn verify_rejects_tampered_manifest() {
     let r = verify_sealed(&bundle, file, &reg);
     assert!(r.authentic); // frame untouched
     assert_eq!(r.unchanged, Verdict::No);
-    assert_eq!(r.unchanged_detail.as_deref(), Some("manifest_hash_mismatch"));
+    assert_eq!(
+        r.unchanged_detail.as_deref(),
+        Some("manifest_hash_mismatch")
+    );
     assert!(!r.overall_accept);
 }
 

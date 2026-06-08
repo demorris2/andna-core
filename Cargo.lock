@@ -98,6 +98,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "andna-seal"
+version = "0.1.0"
+dependencies = [
+ "andna-codec",
+ "andna-contracts",
+ "andna-pipeline",
+ "andna-transcript",
+ "fips204",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha3",
+ "zeroize",
+]
+
+[[package]]
 name = "andna-transcript"
 version = "0.1.0"
 dependencies = [
