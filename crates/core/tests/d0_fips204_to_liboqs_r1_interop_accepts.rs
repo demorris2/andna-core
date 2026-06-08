@@ -40,7 +40,9 @@ use andna_contracts::{
 };
 use andna_core::{verify_frame_v2, VerifyError};
 use andna_d0::test_vectors::{p0_test_fixture, test_device_id16};
-use andna_d0::{build_t_e, derive_epoch_keypair, ratchet_deterministic, D0Context, EpochKeypair, SecretState};
+use andna_d0::{
+    build_t_e, derive_epoch_keypair, ratchet_deterministic, D0Context, EpochKeypair, SecretState,
+};
 use fips204::traits::Signer;
 
 // ── positive: ACCEPT across the real ratchet lineage ─────────────────────────
@@ -135,7 +137,10 @@ fn epoch_keypair_and_te(
     device_id16: &[u8; TE_DEVICE_ID16_LEN],
 ) -> (EpochKeypair, [u8; TE_LEN]) {
     let state = epoch_state(epoch);
-    let ctx = D0Context { epoch, device_id16: *device_id16 };
+    let ctx = D0Context {
+        epoch,
+        device_id16: *device_id16,
+    };
     let kp = derive_epoch_keypair(&state, &ctx).expect("derive_epoch_keypair");
     let te = build_t_e(kp.public_key_bytes(), epoch, device_id16);
     (kp, te)
@@ -144,7 +149,11 @@ fn epoch_keypair_and_te(
 /// Sign mu = SHAKE256(mu_pre, 64) with the epoch key and pack mu_pre || T_E || sig.
 /// The signature is ALWAYS valid over the supplied mu_pre — so when a frame is rejected
 /// it is rejected by a transcript directive, never by an incidental signature break.
-fn frame_from(kp: &EpochKeypair, te: &[u8; TE_LEN], mu_pre: &[u8; MU_PRE_LEN]) -> [u8; FRAME_V2_LEN] {
+fn frame_from(
+    kp: &EpochKeypair,
+    te: &[u8; TE_LEN],
+    mu_pre: &[u8; MU_PRE_LEN],
+) -> [u8; FRAME_V2_LEN] {
     let mut mu = [0u8; MU_LEN];
     andna_transcript::mu_from_mu_pre(mu_pre, &mut mu);
     let sig: [u8; SIG_LEN] = kp
