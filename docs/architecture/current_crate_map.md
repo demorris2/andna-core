@@ -724,3 +724,201 @@ RESULT: ACCEPT
 ```
 
 This workflow proves the local object-decision chain and prepares the path for access-control envelopes.
+
+## CLI Profile-Backed File Seal Boundary
+
+The CLI now supports a reusable local software-profile sealer.
+
+Relevant commands:
+
+```text
+init-sealer
+seal-file
+verify-file
+```
+
+### init-sealer
+
+`init-sealer` belongs to the CLI layer.
+
+Its role is to create a local software-profile credential file for demo and MVP use.
+
+Allowed responsibilities:
+
+```text
+generate local random seed material
+generate local device_id16 material
+store profile metadata
+write profile JSON
+print safety warnings
+```
+
+Not allowed:
+
+```text
+claim hardware custody
+claim clone resistance
+claim physical badge security
+claim enterprise IAM readiness
+```
+
+The generated profile contains seed material. It must be ignored by Git and treated as local secret material.
+
+### seal-file with --profile
+
+`seal-file --profile` belongs to the CLI orchestration layer.
+
+Its role is to load a local profile and call the `andna-seal` library.
+
+Allowed responsibilities:
+
+```text
+read profile JSON
+validate profile schema
+construct SoftwareProfileSigner
+read file bytes
+call seal_file
+write detached sidecar
+optionally write local demo registry
+print file-seal summary
+```
+
+Not allowed:
+
+```text
+reimplement manifest hashing
+reimplement frame signing
+reimplement transcript binding
+reimplement R1 verification
+reimplement R2 authorization
+```
+
+The CLI should remain thin.
+
+The authoritative file-seal behavior remains in:
+
+```text
+crates/andna-seal
+```
+
+### verify-file
+
+`verify-file` belongs to the CLI orchestration layer.
+
+Its role is to load the file, detached seal sidecar, and registry snapshot, then call the verification library path.
+
+Allowed responsibilities:
+
+```text
+read file bytes
+read seal sidecar
+read registry JSON
+call verify_sealed
+print AUTHENTIC / UNCHANGED / AUTHORIZED / RESULT
+write optional evidence JSON
+return nonzero exit code on reject
+```
+
+Not allowed:
+
+```text
+authorize on signature alone
+skip R2
+treat unchanged file as authorized
+treat authorized signer as unchanged file
+```
+
+The decision must preserve separation between:
+
+```text
+AUTHENTIC
+UNCHANGED
+AUTHORIZED
+```
+
+### Current Decision Semantics
+
+The file-seal CLI demonstrates three distinct outcomes.
+
+Clean file and authorized registry:
+
+```text
+AUTHENTIC: yes
+UNCHANGED: yes
+AUTHORIZED: yes
+RESULT: ACCEPT
+```
+
+Tampered file and authorized registry:
+
+```text
+AUTHENTIC: yes
+UNCHANGED: no
+AUTHORIZED: yes
+RESULT: REJECT
+```
+
+Clean file and unauthorized registry:
+
+```text
+AUTHENTIC: yes
+UNCHANGED: yes
+AUTHORIZED: no
+RESULT: REJECT
+```
+
+This separation is architecturally important.
+
+AN-DNA should not collapse these into a single “valid” result.
+
+### Why This Matters
+
+The profile-backed file-seal CLI is the first practical user-facing composition of:
+
+```text
+local credential profile
+file/object manifest
+R1 context binding
+R1 verification
+R2 authorization
+evidence output
+```
+
+This validates the layered design:
+
+```text
+CLI orchestrates
+andna-seal binds object state
+pipeline composes R1 and R2
+core verifies cryptographic authenticity
+andna-r2 decides authorization
+audit/evidence records the decision path
+```
+
+### Future Access-Control Extension
+
+The next access-control layer should reuse this structure.
+
+File seal:
+
+```text
+file manifest
+→ manifest hash
+→ signed R1 ctx_hash
+→ R1 verification
+→ R2 authorization
+→ ACCEPT / REJECT
+```
+
+Access envelope:
+
+```text
+access request manifest
+→ request hash
+→ signed R1 ctx_hash
+→ R1 verification
+→ R2 authorization
+→ ALLOW / DENY
+```
+
+The CLI profile code should therefore remain generic enough to evolve from file sealing into access-request signing without moving core decision logic into the CLI.

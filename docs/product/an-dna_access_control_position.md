@@ -407,3 +407,146 @@ AN-DNA should not be positioned as a new standalone cryptographic primitive.
 It should be positioned as:
 
 > A ratcheting authorization chain for proving whether something should be accepted right now, and why.
+
+## Current Practical Milestone: Profile-Backed File Seal CLI
+
+AN-DNA now has a usable local operator workflow for file sealing and verification.
+
+The current CLI supports:
+
+```bash
+andna init-sealer --profile .andna/sealer-profile.json --epoch 7
+
+andna seal-file sample.txt \
+  --profile .andna/sealer-profile.json \
+  --out sample.txt.andna-seal.json \
+  --content-type text/plain \
+  --registry-out sample.registry.json
+
+andna verify-file sample.txt \
+  --seal sample.txt.andna-seal.json \
+  --registry sample.registry.json \
+  --evidence-out sample.verify.json
+```
+
+This is the first practical workflow where an operator can create a reusable local software-profile sealer and use it to produce replayable file authorization evidence.
+
+The profile-backed workflow demonstrates:
+
+```text
+local software-profile credential creation
+file manifest construction
+manifest hash binding into signed R1 ctx_hash
+R1 authenticity verification
+file unchanged verification
+R2 authorization
+evidence output
+```
+
+The expected successful decision is:
+
+```text
+AUTHENTIC: yes
+UNCHANGED: yes
+AUTHORIZED: yes
+RESULT: ACCEPT
+```
+
+This moves AN-DNA from a library-level proof into a practical local workflow.
+
+### Decision Behavior
+
+The CLI now proves three key cases.
+
+Clean file with authorized registry:
+
+```text
+AUTHENTIC: yes
+UNCHANGED: yes
+AUTHORIZED: yes
+RESULT: ACCEPT
+```
+
+Tampered file with authorized registry:
+
+```text
+AUTHENTIC: yes
+UNCHANGED: no
+AUTHORIZED: yes
+RESULT: REJECT
+```
+
+Clean file with empty or unauthorized registry:
+
+```text
+AUTHENTIC: yes
+UNCHANGED: yes
+AUTHORIZED: no
+RESULT: REJECT
+```
+
+This is the core AN-DNA product pattern:
+
+```text
+Cryptographic authenticity alone is not enough.
+File integrity alone is not enough.
+Authorization policy is evaluated separately.
+The final result depends on the full decision chain.
+```
+
+### Profile Safety Boundary
+
+The current `init-sealer` command creates a local software-profile credential.
+
+This is useful for local demos and MVP workflows, but it is not hardware-backed identity.
+
+The generated profile contains seed material and must not be committed, shared, or treated as clone-resistant.
+
+Current safety boundary:
+
+```text
+software-profile credential
+local signing seed
+local file-seal demonstration
+not hardware custody
+not physical badge custody
+not clone resistance
+not production IAM
+```
+
+This boundary is intentional. The profile-backed file-seal workflow proves the authorization evidence model without claiming production credential custody.
+
+### Access-Control Relevance
+
+The file-seal profile workflow is directly relevant to the access-control roadmap.
+
+A file seal asks:
+
+```text
+Is this object authentic?
+Is this object unchanged?
+Is the sealing profile authorized?
+Can we replay the decision?
+```
+
+A future access envelope will ask:
+
+```text
+Is this access request authentic?
+Is the credential current?
+Is the requester authorized for this resource and action?
+Can we replay the decision?
+```
+
+The same trust pattern applies:
+
+```text
+object or request
+→ manifest/context hash
+→ signed R1 frame
+→ R1 verification
+→ R2 authorization
+→ replayable evidence
+```
+
+The current file-seal CLI is therefore not just a file utility. It is the first operator-facing proof of AN-DNA’s broader authorization-chain model.
