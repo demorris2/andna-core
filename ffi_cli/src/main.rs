@@ -145,6 +145,7 @@ fn main() {
         "tamper" => cmd_tamper(&args[2..]),
         "init-sealer" => cmd_init_sealer(&args[2..]),
         "seal-file" => cmd_seal_file(&args[2..]),
+        "inspect-seal" => cmd_inspect_seal(&args[2..]),
         "verify-file" => cmd_verify_file(&args[2..]),
         // Backward-compatible legacy commands
         "verify-frame" => cmd_verify_frame_legacy(&args[2..]),
@@ -186,6 +187,7 @@ fn usage() -> ! {
     eprintln!("    andna export evidence/");
     eprintln!("    andna init-sealer --profile <profile.json> [--epoch <n>]");
     eprintln!("    andna seal-file <file> --profile <profile.json> --out <seal.json> [--content-type <mime>] [--registry-out <registry.json>]");
+    eprintln!("    andna inspect-seal <seal.json>              Inspect seal sidecar structure without verification");
     eprintln!("    andna seal-file <file> --out <seal.json> --seed-hex <64hex> --device-id16-hex <32hex> [--epoch <n>] [--content-type <mime>] [--registry-out <registry.json>]");
     eprintln!("    andna verify-file <file> --seal <seal.json> --registry <registry.json> [--evidence-out <result.json>]");
     eprintln!("    andna seal-file sample.txt --out sample.txt.andna-seal.json --seed-hex <64hex> --device-id16-hex <32hex> --epoch 7 --registry-out sample.registry.json");
@@ -909,6 +911,107 @@ fn cmd_verify_file(args: &[String]) -> i32 {
     }
 }
 
+fn cmd_inspect_seal(args: &[String]) -> i32 {
+    if args.len() != 1 {
+        usage();
+    }
+
+    let seal_path = Path::new(&args[0]);
+
+    let raw = match fs::read_to_string(seal_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot read seal {}: {}", seal_path.display(), e);
+            return 2;
+        }
+    };
+
+    let bundle: andna_seal::SealedBundle = match serde_json::from_str(&raw) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: cannot parse seal {}: {}", seal_path.display(), e);
+            return 2;
+        }
+    };
+
+    let frame_bytes: Vec<u8> = match hex::decode(&bundle.frame_hex) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: seal frame_hex is not valid hex: {}", e);
+            return 2;
+        }
+    };
+
+    let frame_len_status = if frame_bytes.len() == FRAME_V2_LEN {
+        "ok"
+    } else {
+        "bad_length"
+    };
+
+    let manifest_hash = bundle.manifest.manifest_hash();
+    let manifest_hash_hex = hex::encode(manifest_hash);
+
+    println!("\n════════════════════════════════════════════════════════════");
+    println!("  AN-DNA Seal Inspection");
+    println!("════════════════════════════════════════════════════════════");
+    kv(4, "Seal sidecar", &seal_path.display().to_string());
+    kv(4, "Sidecar schema", &bundle.schema_version);
+    kv(4, "Frame encoding", &bundle.frame_encoding);
+    kv(4, "Frame length", &frame_bytes.len().to_string());
+    kv(4, "Frame length status", frame_len_status);
+    println!("────────────────────────────────────────────────────────────");
+    kv(4, "Manifest schema", &bundle.manifest.schema_version);
+    kv(4, "Manifest policy", &bundle.manifest.manifest_policy);
+    kv(4, "Digest algorithm", &bundle.manifest.digest_algorithm);
+    kv(4, "File name", &bundle.manifest.file_name);
+    kv(4, "File size", &bundle.manifest.file_size.to_string());
+    kv(
+        4,
+        "Content type",
+        bundle.manifest.content_type.as_deref().unwrap_or("(none)"),
+    );
+    kv(4, "File hash", &bundle.manifest.file_hash_hex);
+    kv(4, "Manifest hash", &manifest_hash_hex);
+
+    if frame_bytes.len() != FRAME_V2_LEN {
+        println!("────────────────────────────────────────────────────────────");
+        println!("  Inspection stopped: frame length is not FRAME_V2_LEN.");
+        println!("  This command does not repair or verify malformed seals.");
+        println!();
+        return 1;
+    }
+
+    let frame_ctx_hash = extract_frame_ctx_hash_for_cli(&frame_bytes);
+    let frame_ctx_hash_hex = hex::encode(frame_ctx_hash);
+    let ctx_matches = frame_ctx_hash == manifest_hash;
+
+    let mu_epoch = extract_mu_pre_epoch_for_cli(&frame_bytes);
+    let te_epoch = extract_te_epoch_for_cli(&frame_bytes);
+    let device_id16 = extract_te_device_id16_for_cli(&frame_bytes);
+    let device_id32 = extract_mu_pre_device_id32_for_cli(&frame_bytes);
+
+    println!("────────────────────────────────────────────────────────────");
+    kv(4, "Frame ctx_hash", &frame_ctx_hash_hex);
+    kv(
+        4,
+        "ctx_hash matches",
+        if ctx_matches { "yes" } else { "no" },
+    );
+    kv(4, "Frame epoch", &mu_epoch.to_string());
+    kv(4, "T_E epoch", &te_epoch.to_string());
+    kv(4, "device_id16", &hex::encode(device_id16));
+    kv(4, "device_id32", &hex::encode(device_id32));
+    println!("────────────────────────────────────────────────────────────");
+    println!("  Inspection only: this does NOT verify the file or authorize the signer.");
+    println!();
+
+    if ctx_matches {
+        0
+    } else {
+        1
+    }
+}
+
 fn cmd_verify_frame_legacy(args: &[String]) -> i32 {
     if args.is_empty() {
         usage();
@@ -1298,6 +1401,41 @@ fn hex_lower(bytes: &[u8]) -> String {
         use std::fmt::Write as _;
         let _ = write!(&mut out, "{:02x}", b);
     }
+    out
+}
+
+fn extract_frame_ctx_hash_for_cli(frame: &[u8]) -> [u8; MU_PRE_CTX_HASH_LEN] {
+    let off = FRAME_V2_MU_PRE_OFF + MU_PRE_CTX_HASH_OFF;
+    let mut out = [0u8; MU_PRE_CTX_HASH_LEN];
+    out.copy_from_slice(&frame[off..off + MU_PRE_CTX_HASH_LEN]);
+    out
+}
+
+fn extract_mu_pre_epoch_for_cli(frame: &[u8]) -> u64 {
+    let off = FRAME_V2_MU_PRE_OFF + MU_PRE_EPOCH_OFF;
+    let mut raw = [0u8; MU_PRE_EPOCH_LEN];
+    raw.copy_from_slice(&frame[off..off + MU_PRE_EPOCH_LEN]);
+    u64::from_le_bytes(raw)
+}
+
+fn extract_te_epoch_for_cli(frame: &[u8]) -> u64 {
+    let off = FRAME_V2_TE_OFF + TE_EPOCH_OFF;
+    let mut raw = [0u8; TE_EPOCH_LEN];
+    raw.copy_from_slice(&frame[off..off + TE_EPOCH_LEN]);
+    u64::from_le_bytes(raw)
+}
+
+fn extract_te_device_id16_for_cli(frame: &[u8]) -> [u8; TE_DEVICE_ID16_LEN] {
+    let off = FRAME_V2_TE_OFF + TE_DEVICE_ID16_OFF;
+    let mut out = [0u8; TE_DEVICE_ID16_LEN];
+    out.copy_from_slice(&frame[off..off + TE_DEVICE_ID16_LEN]);
+    out
+}
+
+fn extract_mu_pre_device_id32_for_cli(frame: &[u8]) -> [u8; MU_PRE_DEVICE_ID32_LEN] {
+    let off = FRAME_V2_MU_PRE_OFF + MU_PRE_DEVICE_ID32_OFF;
+    let mut out = [0u8; MU_PRE_DEVICE_ID32_LEN];
+    out.copy_from_slice(&frame[off..off + MU_PRE_DEVICE_ID32_LEN]);
     out
 }
 
