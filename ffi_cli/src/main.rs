@@ -15,7 +15,10 @@
 
 use andna_contracts::*;
 use andna_ffi::*;
-use andna_seal::{seal_file, verify_sealed, Registry, SealedBundle, SoftwareProfileSigner};
+use andna_seal::{
+    seal_file, verify_sealed, Registry, RuntimeContext, SealEvidenceV1, SealedBundle,
+    SoftwareProfileSigner,
+};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use std::{
@@ -190,6 +193,7 @@ fn usage() -> ! {
     eprintln!("    andna inspect-seal <seal.json>              Inspect seal sidecar structure without verification");
     eprintln!("    andna seal-file <file> --out <seal.json> --seed-hex <64hex> --device-id16-hex <32hex> [--epoch <n>] [--content-type <mime>] [--registry-out <registry.json>]");
     eprintln!("    andna verify-file <file> --seal <seal.json> --registry <registry.json> [--evidence-out <result.json>]");
+    eprintln!("    andna verify-file ... --evidence-out <result.json> --attest-profile <verifier-profile.json> [--attestation-out <seal.json>] [--attest-registry-out <registry.json>]");
     eprintln!("    andna seal-file sample.txt --out sample.txt.andna-seal.json --seed-hex <64hex> --device-id16-hex <32hex> --epoch 7 --registry-out sample.registry.json");
     eprintln!("    andna verify-file sample.txt --seal sample.txt.andna-seal.json --registry sample.registry.json");
     process::exit(2);
@@ -897,11 +901,104 @@ fn cmd_verify_file(args: &[String]) -> i32 {
     println!();
 
     if let Some(out_path) = evidence_out {
-        if let Err(e) = fs::write(&out_path, result.to_json_pretty()) {
+        // Stable evidence contract (andna-seal-evidence-v1): deterministic section +
+        // digest are replayable; runtime paths/versions are recorded but digest-exempt.
+        let evidence = SealEvidenceV1::from_result(
+            &result,
+            RuntimeContext {
+                file_path: Some(input.display().to_string()),
+                seal_path: Some(seal_path.clone()),
+                registry_path: Some(registry_path.clone()),
+                tool_version: Some(format!("andna {}", env!("CARGO_PKG_VERSION"))),
+                verified_at_unix_ms: Some(now_unix_ms()),
+            },
+        );
+        if let Err(e) = fs::write(&out_path, evidence.to_json_pretty()) {
             eprintln!("error: cannot write evidence {}: {}", out_path, e);
             return 2;
         }
         println!("Evidence written: {}", out_path);
+        kv(4, "Evidence digest", &evidence.evidence_digest_hex);
+
+        // Optional evidence attestation: seal the evidence file itself with a VERIFIER
+        // profile. Authenticity of the decision record then verifies through the same
+        // R1 -> R2 chain as any sealed file (no second signature path).
+        if let Some(attest_profile_path) = opt_value(args, "--attest-profile") {
+            let raw = match fs::read_to_string(&attest_profile_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "error: cannot read attest profile {}: {}",
+                        attest_profile_path, e
+                    );
+                    return 2;
+                }
+            };
+            let profile: CliSealerProfile = match serde_json::from_str(&raw) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!(
+                        "error: cannot parse attest profile {}: {}",
+                        attest_profile_path, e
+                    );
+                    return 2;
+                }
+            };
+            let verifier_signer = match profile.to_signer() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "error: invalid attest profile {}: {}",
+                        attest_profile_path, e
+                    );
+                    return 2;
+                }
+            };
+
+            // Re-read the evidence file so the attestation binds the exact bytes on disk.
+            let evidence_bytes = match fs::read(&out_path) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("error: cannot re-read evidence {}: {}", out_path, e);
+                    return 2;
+                }
+            };
+            let evidence_file_name = Path::new(&out_path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("evidence.json")
+                .to_string();
+
+            let attestation = seal_file(
+                evidence_file_name,
+                &evidence_bytes,
+                Some("application/json".to_string()),
+                &verifier_signer,
+            );
+
+            let attestation_out = opt_value(args, "--attestation-out")
+                .unwrap_or_else(|| format!("{}.andna-seal.json", out_path));
+            if let Err(e) = fs::write(&attestation_out, attestation.to_json_pretty()) {
+                eprintln!("error: cannot write attestation {}: {}", attestation_out, e);
+                return 2;
+            }
+            kv(4, "Evidence attestation", &attestation_out);
+            kv(
+                4,
+                "Attester source",
+                &format!("profile: {}", attest_profile_path),
+            );
+
+            if let Some(reg_path) = opt_value(args, "--attest-registry-out") {
+                if let Err(e) = write_registry_for_bundle(&attestation, Path::new(&reg_path)) {
+                    eprintln!("error: cannot write attest registry {}: {}", reg_path, e);
+                    return 2;
+                }
+                kv(4, "Attest registry", &reg_path);
+            }
+            println!("  Attestation scope: authenticity of the evidence record under the");
+            println!("  verifier software-profile; verify it with `andna verify-file`.");
+        }
     }
 
     if result.overall_accept {

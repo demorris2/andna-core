@@ -47,11 +47,15 @@
 
 #![forbid(unsafe_code)]
 
+mod evidence;
 mod manifest;
 mod seal;
 mod signer;
 mod verify;
 
+pub use evidence::{
+    DeterministicEvidence, RuntimeContext, SealEvidenceV1, EVIDENCE_SCHEMA_VERSION,
+};
 pub use manifest::{
     Manifest, SealError, DIGEST_ALGORITHM, MANIFEST_POLICY_V0, MANIFEST_SCHEMA_VERSION,
 };

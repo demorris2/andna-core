@@ -1,46 +1,44 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# AN-DNA file-seal CLI contract test.
+# Style rule: NO backslash line continuations anywhere in this script. Pasted edits have
+# twice destroyed continuation backslashes / '$' characters; single-line commands are
+# immune. Keep it that way.
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/target/debug/andna.exe"
 
 cd "$ROOT"
 
+cleanup() {
+  rm -rf .andna
+  rm -f sample.txt sample.tampered.txt
+  rm -f sample.txt.andna-seal.json sample.txt.tampered-manifest.andna-seal.json sample.txt.bad-frame.andna-seal.json
+  rm -f sample.registry.json empty.registry.json verifier.registry.json
+  rm -f sample.verify.json sample.verify2.json sample.verify.tampered.json sample.verify.json.andna-seal.json
+}
+
 echo "== AN-DNA file-seal CLI contract test =="
 
-cargo build -p ffi-cli --locked \
-  --features "oqs-backend fips-integrity-stub"
+cargo build -p ffi-cli --locked --features "oqs-backend fips-integrity-stub"
 
 if [[ ! -x "$BIN" ]]; then
   echo "error: expected CLI binary at $BIN" >&2
   exit 2
 fi
 
-rm -rf .andna
-rm -f sample.txt \
-      sample.tampered.txt \
-      sample.txt.andna-seal.json \
-      sample.txt.tampered-manifest.andna-seal.json \
-      sample.txt.bad-frame.andna-seal.json \
-      sample.registry.json \
-      sample.verify.json \
-      empty.registry.json
+cleanup
 
 echo "hello AN-DNA CLI contract" > sample.txt
 
 echo
 echo "== init-sealer =="
-"$BIN" init-sealer \
-  --profile .andna/sealer-profile.json \
-  --epoch 7
+"$BIN" init-sealer --profile .andna/sealer-profile.json --epoch 7
 
 echo
 echo "== seal-file =="
-"$BIN" seal-file sample.txt \
-  --profile .andna/sealer-profile.json \
-  --out sample.txt.andna-seal.json \
-  --content-type text/plain \
-  --registry-out sample.registry.json
+"$BIN" seal-file sample.txt --profile .andna/sealer-profile.json --out sample.txt.andna-seal.json --content-type text/plain --registry-out sample.registry.json
 
 echo
 echo "== inspect-seal valid sidecar =="
@@ -54,10 +52,7 @@ grep -q "T_E epoch:             7" <<<"$INSPECT_OUT"
 
 echo
 echo "== verify-file clean + authorized registry =="
-VERIFY_OUT="$("$BIN" verify-file sample.txt \
-  --seal sample.txt.andna-seal.json \
-  --registry sample.registry.json \
-  --evidence-out sample.verify.json)"
+VERIFY_OUT="$("$BIN" verify-file sample.txt --seal sample.txt.andna-seal.json --registry sample.registry.json --evidence-out sample.verify.json)"
 echo "$VERIFY_OUT"
 
 grep -q "AUTHENTIC:             yes" <<<"$VERIFY_OUT"
@@ -68,14 +63,73 @@ grep -q "RESULT:                ACCEPT" <<<"$VERIFY_OUT"
 test -f sample.verify.json
 
 echo
+echo "== evidence record matches the v1 contract =="
+grep -q '"schema_version": "andna-seal-evidence-v1"' sample.verify.json
+grep -q '"result": "ACCEPT"' sample.verify.json
+grep -q '"evidence_digest_hex"' sample.verify.json
+echo "evidence schema/result/digest fields present"
+
+echo
+echo "== evidence determinism: second run, different runtime, same digest =="
+"$BIN" verify-file sample.txt --seal sample.txt.andna-seal.json --registry sample.registry.json --evidence-out sample.verify2.json > /dev/null
+
+python - <<'PY'
+import json
+a = json.load(open("sample.verify.json"))
+b = json.load(open("sample.verify2.json"))
+assert a["deterministic"] == b["deterministic"], "deterministic sections differ"
+assert a["evidence_digest_hex"] == b["evidence_digest_hex"], "evidence digests differ"
+print("evidence deterministic section + digest: identical across runs")
+PY
+
+echo
+echo "== evidence attestation: create verifier profile, attest, verify attestation =="
+"$BIN" init-sealer --profile .andna/verifier-profile.json --epoch 3
+
+"$BIN" verify-file sample.txt --seal sample.txt.andna-seal.json --registry sample.registry.json --evidence-out sample.verify.json --attest-profile .andna/verifier-profile.json --attest-registry-out verifier.registry.json > /dev/null
+
+test -f sample.verify.json.andna-seal.json
+test -f verifier.registry.json
+
+ATTEST_OUT="$("$BIN" verify-file sample.verify.json --seal sample.verify.json.andna-seal.json --registry verifier.registry.json)"
+echo "$ATTEST_OUT"
+
+grep -q "AUTHENTIC:             yes" <<<"$ATTEST_OUT"
+grep -q "UNCHANGED:             yes" <<<"$ATTEST_OUT"
+grep -q "AUTHORIZED:            yes" <<<"$ATTEST_OUT"
+grep -q "RESULT:                ACCEPT" <<<"$ATTEST_OUT"
+
+echo
+echo "== tampered evidence record fails its attestation =="
+python - <<'PY'
+import json
+obj = json.load(open("sample.verify.json"))
+obj["deterministic"]["result"] = "REJECT"  # forge the record
+json.dump(obj, open("sample.verify.tampered.json", "w"), indent=2)
+PY
+
+set +e
+FORGED_OUT="$("$BIN" verify-file sample.verify.tampered.json --seal sample.verify.json.andna-seal.json --registry verifier.registry.json 2>&1)"
+FORGED_CODE=$?
+set -e
+echo "$FORGED_OUT"
+
+if [[ "$FORGED_CODE" -ne 1 ]]; then
+  echo "error: expected forged-evidence verify exit code 1, got $FORGED_CODE" >&2
+  exit 1
+fi
+
+grep -q "AUTHENTIC:             yes" <<<"$FORGED_OUT"
+grep -q "UNCHANGED:             no" <<<"$FORGED_OUT"
+grep -q "RESULT:                REJECT" <<<"$FORGED_OUT"
+
+echo
 echo "== verify-file tampered file + authorized registry =="
 cp sample.txt sample.tampered.txt
 echo "tamper" >> sample.tampered.txt
 
 set +e
-TAMPER_OUT="$("$BIN" verify-file sample.tampered.txt \
-  --seal sample.txt.andna-seal.json \
-  --registry sample.registry.json 2>&1)"
+TAMPER_OUT="$("$BIN" verify-file sample.tampered.txt --seal sample.txt.andna-seal.json --registry sample.registry.json 2>&1)"
 TAMPER_CODE=$?
 set -e
 
@@ -103,9 +157,7 @@ cat > empty.registry.json <<'JSON'
 JSON
 
 set +e
-EMPTY_REG_OUT="$("$BIN" verify-file sample.txt \
-  --seal sample.txt.andna-seal.json \
-  --registry empty.registry.json 2>&1)"
+EMPTY_REG_OUT="$("$BIN" verify-file sample.txt --seal sample.txt.andna-seal.json --registry empty.registry.json 2>&1)"
 EMPTY_REG_CODE=$?
 set -e
 
@@ -186,9 +238,7 @@ grep -q "Inspection stopped: frame length is not FRAME_V2_LEN." <<<"$BAD_FRAME_O
 echo
 echo "== verify-file missing input =="
 set +e
-MISSING_OUT="$("$BIN" verify-file missing.txt \
-  --seal missing.andna-seal.json \
-  --registry missing.registry.json 2>&1)"
+MISSING_OUT="$("$BIN" verify-file missing.txt --seal missing.andna-seal.json --registry missing.registry.json 2>&1)"
 MISSING_CODE=$?
 set -e
 
@@ -203,15 +253,7 @@ grep -q "error:" <<<"$MISSING_OUT"
 
 echo
 echo "== cleanup =="
-rm -rf .andna
-rm -f sample.txt \
-      sample.tampered.txt \
-      sample.txt.andna-seal.json \
-      sample.txt.tampered-manifest.andna-seal.json \
-      sample.txt.bad-frame.andna-seal.json \
-      sample.registry.json \
-      sample.verify.json \
-      empty.registry.json
+cleanup
 
 echo
 echo "PASS: file-seal CLI contract"

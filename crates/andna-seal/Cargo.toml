@@ -31,3 +31,10 @@ fips204 = "=0.4.6"
 [[test]]
 name = "file_seal_verify"
 required-features = ["oqs-backend"]
+
+[[test]]
+name = "evidence_contract"
+required-features = ["oqs-backend"]
+
+# Evidence tests need hex for frame decoding in fixtures (already a dependency above) and
+# construct Registry/RegistryEntry via the pipeline re-exports — no new dependencies.
