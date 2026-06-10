@@ -7,7 +7,11 @@ set -euo pipefail
 # immune. Keep it that way.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT/target/debug/andna.exe"
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+  BIN="$ROOT/target/debug/andna.exe"
+else
+  BIN="$ROOT/target/debug/andna"
+fi
 
 cd "$ROOT"
 
