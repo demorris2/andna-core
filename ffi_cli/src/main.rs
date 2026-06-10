@@ -15,6 +15,10 @@
 
 use andna_contracts::*;
 use andna_ffi::*;
+use andna_seal::{
+    seal_file, verify_sealed, Registry, RuntimeContext, SealEvidenceV1, SealedBundle,
+    SoftwareProfileSigner,
+};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use std::{
@@ -65,6 +69,67 @@ struct EvidenceManifest {
     generated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct CliRegistryFile {
+    snapshot_seq: u64,
+    as_of_unix_ms: u64,
+    policy_version: String,
+    entries: Vec<CliRegistryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CliRegistryEntry {
+    device_id16_hex: String,
+    device_id32_hex: String,
+    authorized_te_hashes_hex: Vec<String>,
+    current_epoch: u64,
+    revoked: bool,
+    frozen: bool,
+    recovery_hold: bool,
+    policy_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CliSealerProfile {
+    schema_version: String,
+    profile_type: String,
+    seed_hex: String,
+    device_id16_hex: String,
+    epoch: u64,
+    created_at_unix_ms: u64,
+    warning: String,
+}
+
+impl CliSealerProfile {
+    fn to_signer(&self) -> Result<SoftwareProfileSigner, String> {
+        if self.schema_version != "andna-sealer-profile-v0" {
+            return Err(format!(
+                "unsupported sealer profile schema: {}",
+                self.schema_version
+            ));
+        }
+
+        if self.profile_type != "software-profile" {
+            return Err(format!(
+                "unsupported sealer profile type: {}",
+                self.profile_type
+            ));
+        }
+
+        let seed = parse_hex_array::<32>(&self.seed_hex, "profile.seed_hex")?;
+        let device_id16 = parse_hex_array::<TE_DEVICE_ID16_LEN>(
+            &self.device_id16_hex,
+            "profile.device_id16_hex",
+        )?;
+
+        Ok(SoftwareProfileSigner::from_seed(
+            seed,
+            device_id16,
+            self.epoch,
+        ))
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -81,6 +146,10 @@ fn main() {
         "export" => cmd_export(&args[2..]),
         "gen" => cmd_gen(&args[2..]),
         "tamper" => cmd_tamper(&args[2..]),
+        "init-sealer" => cmd_init_sealer(&args[2..]),
+        "seal-file" => cmd_seal_file(&args[2..]),
+        "inspect-seal" => cmd_inspect_seal(&args[2..]),
+        "verify-file" => cmd_verify_file(&args[2..]),
         // Backward-compatible legacy commands
         "verify-frame" => cmd_verify_frame_legacy(&args[2..]),
         "smoke" => cmd_smoke(),
@@ -119,6 +188,14 @@ fn usage() -> ! {
     eprintln!("    andna replay verification_log.json");
     eprintln!("    andna replay verification_log.json --frame sample_frame.bin");
     eprintln!("    andna export evidence/");
+    eprintln!("    andna init-sealer --profile <profile.json> [--epoch <n>]");
+    eprintln!("    andna seal-file <file> --profile <profile.json> --out <seal.json> [--content-type <mime>] [--registry-out <registry.json>]");
+    eprintln!("    andna inspect-seal <seal.json>              Inspect seal sidecar structure without verification");
+    eprintln!("    andna seal-file <file> --out <seal.json> --seed-hex <64hex> --device-id16-hex <32hex> [--epoch <n>] [--content-type <mime>] [--registry-out <registry.json>]");
+    eprintln!("    andna verify-file <file> --seal <seal.json> --registry <registry.json> [--evidence-out <result.json>]");
+    eprintln!("    andna verify-file ... --evidence-out <result.json> --attest-profile <verifier-profile.json> [--attestation-out <seal.json>] [--attest-registry-out <registry.json>]");
+    eprintln!("    andna seal-file sample.txt --out sample.txt.andna-seal.json --seed-hex <64hex> --device-id16-hex <32hex> --epoch 7 --registry-out sample.registry.json");
+    eprintln!("    andna verify-file sample.txt --seal sample.txt.andna-seal.json --registry sample.registry.json");
     process::exit(2);
 }
 
@@ -492,6 +569,546 @@ fn cmd_tamper(args: &[String]) -> i32 {
     0
 }
 
+fn cmd_init_sealer(args: &[String]) -> i32 {
+    let Some(profile_path) = opt_value(args, "--profile") else {
+        eprintln!("error: init-sealer requires --profile <profile.json>");
+        return 2;
+    };
+
+    let epoch = match opt_value(args, "--epoch") {
+        Some(s) => match s.parse::<u64>() {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("error: invalid --epoch value {}: {}", s, e);
+                return 2;
+            }
+        },
+        None => 7,
+    };
+
+    let seed = match random_array::<32>() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: could not generate seed: {}", e);
+            return 2;
+        }
+    };
+
+    let device_id16 = match random_array::<TE_DEVICE_ID16_LEN>() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: could not generate device_id16: {}", e);
+            return 2;
+        }
+    };
+
+    let profile = CliSealerProfile {
+        schema_version: "andna-sealer-profile-v0".to_string(),
+        profile_type: "software-profile".to_string(),
+        seed_hex: hex::encode(seed),
+        device_id16_hex: hex::encode(device_id16),
+        epoch,
+        created_at_unix_ms: now_unix_ms(),
+        warning: "Software-profile demo credential. Contains signing seed material. Do not commit, share, or use as hardware-backed custody proof.".to_string(),
+    };
+
+    let path = Path::new(&profile_path);
+
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                eprintln!(
+                    "error: cannot create profile directory {}: {}",
+                    parent.display(),
+                    e
+                );
+                return 2;
+            }
+        }
+    }
+
+    let json =
+        serde_json::to_string_pretty(&profile).expect("CLI sealer profile is always serializable");
+
+    if let Err(e) = fs::write(path, json) {
+        eprintln!("error: cannot write profile {}: {}", path.display(), e);
+        return 2;
+    }
+
+    println!("\n════════════════════════════════════════════════════════════");
+    println!("  AN-DNA Software-Profile Sealer Created");
+    println!("════════════════════════════════════════════════════════════");
+    kv(4, "Profile", &path.display().to_string());
+    kv(4, "Profile type", "software-profile");
+    kv(4, "Epoch", &epoch.to_string());
+    println!("────────────────────────────────────────────────────────────");
+    println!("  Warning: profile contains seed material. Do not commit or share.");
+    println!("  Scope: software-profile only; not hardware custody or clone resistance.");
+    println!();
+
+    0
+}
+
+fn cmd_seal_file(args: &[String]) -> i32 {
+    if args.is_empty() {
+        usage();
+    }
+
+    let input = Path::new(&args[0]);
+
+    let Some(out_path) = opt_value(args, "--out") else {
+        eprintln!("error: seal-file requires --out <seal.json>");
+        return 2;
+    };
+
+    let content_type = opt_value(args, "--content-type");
+    let registry_out = opt_value(args, "--registry-out");
+
+    let (signer, signer_source, signer_epoch) = if let Some(profile_path) =
+        opt_value(args, "--profile")
+    {
+        if opt_value(args, "--seed-hex").is_some() || opt_value(args, "--device-id16-hex").is_some()
+        {
+            eprintln!("error: use either --profile or --seed-hex/--device-id16-hex, not both");
+            return 2;
+        }
+
+        if opt_value(args, "--epoch").is_some() {
+            eprintln!("error: --epoch is stored in the sealer profile when --profile is used");
+            return 2;
+        }
+
+        let raw = match fs::read_to_string(&profile_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: cannot read profile {}: {}", profile_path, e);
+                return 2;
+            }
+        };
+
+        let profile: CliSealerProfile = match serde_json::from_str(&raw) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("error: cannot parse profile {}: {}", profile_path, e);
+                return 2;
+            }
+        };
+
+        let epoch = profile.epoch;
+
+        let signer = match profile.to_signer() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: invalid sealer profile {}: {}", profile_path, e);
+                return 2;
+            }
+        };
+
+        (signer, format!("profile: {}", profile_path), epoch)
+    } else {
+        let Some(seed_hex) = opt_value(args, "--seed-hex") else {
+            eprintln!(
+                "error: seal-file requires either --profile <profile.json> or --seed-hex <64 hex chars>"
+            );
+            return 2;
+        };
+
+        let Some(device_id16_hex) = opt_value(args, "--device-id16-hex") else {
+            eprintln!(
+                "error: seal-file requires --device-id16-hex <32 hex chars> when --profile is not used"
+            );
+            return 2;
+        };
+
+        let epoch = match opt_value(args, "--epoch") {
+            Some(s) => match s.parse::<u64>() {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("error: invalid --epoch value {}: {}", s, e);
+                    return 2;
+                }
+            },
+            None => 7,
+        };
+
+        let seed = match parse_hex_array::<32>(&seed_hex, "seed-hex") {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return 2;
+            }
+        };
+
+        let device_id16 =
+            match parse_hex_array::<TE_DEVICE_ID16_LEN>(&device_id16_hex, "device-id16-hex") {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("error: {}", e);
+                    return 2;
+                }
+            };
+
+        (
+            SoftwareProfileSigner::from_seed(seed, device_id16, epoch),
+            "manual seed/device flags".to_string(),
+            epoch,
+        )
+    };
+
+    let file_bytes = match fs::read(input) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {}", input.display(), e);
+            return 2;
+        }
+    };
+
+    let file_name = input
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_else(|| input.to_str().unwrap_or("sealed-file"))
+        .to_string();
+
+    let bundle = seal_file(file_name, &file_bytes, content_type, &signer);
+
+    let out = Path::new(&out_path);
+    if let Err(e) = fs::write(out, bundle.to_json_pretty()) {
+        eprintln!("error: cannot write {}: {}", out.display(), e);
+        return 2;
+    }
+
+    println!("\n════════════════════════════════════════════════════════════");
+    println!("  AN-DNA File Seal Created");
+    println!("════════════════════════════════════════════════════════════");
+    kv(4, "Input file", &input.display().to_string());
+    kv(4, "Seal sidecar", &out.display().to_string());
+    kv(4, "Signer source", &signer_source);
+    kv(
+        4,
+        "Manifest hash",
+        &hex::encode(bundle.manifest.manifest_hash()),
+    );
+    kv(4, "File hash", &bundle.manifest.file_hash_hex);
+    kv(4, "Frame encoding", &bundle.frame_encoding);
+    kv(4, "Epoch", &signer_epoch.to_string());
+    println!("────────────────────────────────────────────────────────────");
+    println!("  Scope: integrity/authenticity binding only; this does NOT encrypt the file.");
+
+    if let Some(reg_path) = registry_out {
+        if let Err(e) = write_registry_for_bundle(&bundle, Path::new(&reg_path)) {
+            eprintln!("error: cannot write registry {}: {}", reg_path, e);
+            return 2;
+        }
+        kv(4, "Registry", &reg_path);
+    }
+
+    println!();
+    0
+}
+
+fn cmd_verify_file(args: &[String]) -> i32 {
+    if args.is_empty() {
+        usage();
+    }
+
+    let input = Path::new(&args[0]);
+
+    let Some(seal_path) = opt_value(args, "--seal") else {
+        eprintln!("error: verify-file requires --seal <seal.json>");
+        return 2;
+    };
+
+    let Some(registry_path) = opt_value(args, "--registry") else {
+        eprintln!("error: verify-file requires --registry <registry.json>");
+        return 2;
+    };
+
+    let evidence_out = opt_value(args, "--evidence-out");
+
+    let file_bytes = match fs::read(input) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {}", input.display(), e);
+            return 2;
+        }
+    };
+
+    let seal_raw = match fs::read_to_string(&seal_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot read seal {}: {}", seal_path, e);
+            return 2;
+        }
+    };
+
+    let bundle: SealedBundle = match serde_json::from_str(&seal_raw) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: cannot parse seal {}: {}", seal_path, e);
+            return 2;
+        }
+    };
+
+    let registry_raw = match fs::read_to_string(&registry_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot read registry {}: {}", registry_path, e);
+            return 2;
+        }
+    };
+
+    let registry = match Registry::from_json(&registry_raw) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: cannot parse registry {}: {:?}", registry_path, e);
+            return 2;
+        }
+    };
+
+    let result = verify_sealed(&bundle, &file_bytes, &registry);
+
+    println!("\n════════════════════════════════════════════════════════════");
+    println!("  AN-DNA File Seal Verification");
+    println!("════════════════════════════════════════════════════════════");
+    kv(4, "Input file", &input.display().to_string());
+    kv(4, "Seal sidecar", &seal_path);
+    kv(4, "Registry", &registry_path);
+    println!("────────────────────────────────────────────────────────────");
+    kv(4, "AUTHENTIC", if result.authentic { "yes" } else { "no" });
+    kv(4, "UNCHANGED", result.unchanged.as_str());
+    if let Some(detail) = &result.unchanged_detail {
+        kv(4, "Unchanged detail", detail);
+    }
+    kv(4, "AUTHORIZED", result.authorized.as_str());
+    kv(
+        4,
+        "RESULT",
+        if result.overall_accept {
+            "ACCEPT"
+        } else {
+            "REJECT"
+        },
+    );
+    println!("────────────────────────────────────────────────────────────");
+    kv(4, "Summary", &result.summary());
+    kv(4, "File hash", &result.computed_file_hash_hex);
+    if let Some(h) = &result.computed_manifest_hash_hex {
+        kv(4, "Manifest hash", h);
+    }
+    if let Some(h) = &result.frame_ctx_hash_hex {
+        kv(4, "Frame ctx_hash", h);
+    }
+    println!();
+
+    if let Some(out_path) = evidence_out {
+        // Stable evidence contract (andna-seal-evidence-v1): deterministic section +
+        // digest are replayable; runtime paths/versions are recorded but digest-exempt.
+        let evidence = SealEvidenceV1::from_result(
+            &result,
+            RuntimeContext {
+                file_path: Some(input.display().to_string()),
+                seal_path: Some(seal_path.clone()),
+                registry_path: Some(registry_path.clone()),
+                tool_version: Some(format!("andna {}", env!("CARGO_PKG_VERSION"))),
+                verified_at_unix_ms: Some(now_unix_ms()),
+            },
+        );
+        if let Err(e) = fs::write(&out_path, evidence.to_json_pretty()) {
+            eprintln!("error: cannot write evidence {}: {}", out_path, e);
+            return 2;
+        }
+        println!("Evidence written: {}", out_path);
+        kv(4, "Evidence digest", &evidence.evidence_digest_hex);
+
+        // Optional evidence attestation: seal the evidence file itself with a VERIFIER
+        // profile. Authenticity of the decision record then verifies through the same
+        // R1 -> R2 chain as any sealed file (no second signature path).
+        if let Some(attest_profile_path) = opt_value(args, "--attest-profile") {
+            let raw = match fs::read_to_string(&attest_profile_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "error: cannot read attest profile {}: {}",
+                        attest_profile_path, e
+                    );
+                    return 2;
+                }
+            };
+            let profile: CliSealerProfile = match serde_json::from_str(&raw) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!(
+                        "error: cannot parse attest profile {}: {}",
+                        attest_profile_path, e
+                    );
+                    return 2;
+                }
+            };
+            let verifier_signer = match profile.to_signer() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "error: invalid attest profile {}: {}",
+                        attest_profile_path, e
+                    );
+                    return 2;
+                }
+            };
+
+            // Re-read the evidence file so the attestation binds the exact bytes on disk.
+            let evidence_bytes = match fs::read(&out_path) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("error: cannot re-read evidence {}: {}", out_path, e);
+                    return 2;
+                }
+            };
+            let evidence_file_name = Path::new(&out_path)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("evidence.json")
+                .to_string();
+
+            let attestation = seal_file(
+                evidence_file_name,
+                &evidence_bytes,
+                Some("application/json".to_string()),
+                &verifier_signer,
+            );
+
+            let attestation_out = opt_value(args, "--attestation-out")
+                .unwrap_or_else(|| format!("{}.andna-seal.json", out_path));
+            if let Err(e) = fs::write(&attestation_out, attestation.to_json_pretty()) {
+                eprintln!("error: cannot write attestation {}: {}", attestation_out, e);
+                return 2;
+            }
+            kv(4, "Evidence attestation", &attestation_out);
+            kv(
+                4,
+                "Attester source",
+                &format!("profile: {}", attest_profile_path),
+            );
+
+            if let Some(reg_path) = opt_value(args, "--attest-registry-out") {
+                if let Err(e) = write_registry_for_bundle(&attestation, Path::new(&reg_path)) {
+                    eprintln!("error: cannot write attest registry {}: {}", reg_path, e);
+                    return 2;
+                }
+                kv(4, "Attest registry", &reg_path);
+            }
+            println!("  Attestation scope: authenticity of the evidence record under the");
+            println!("  verifier software-profile; verify it with `andna verify-file`.");
+        }
+    }
+
+    if result.overall_accept {
+        0
+    } else {
+        1
+    }
+}
+
+fn cmd_inspect_seal(args: &[String]) -> i32 {
+    if args.len() != 1 {
+        usage();
+    }
+
+    let seal_path = Path::new(&args[0]);
+
+    let raw = match fs::read_to_string(seal_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot read seal {}: {}", seal_path.display(), e);
+            return 2;
+        }
+    };
+
+    let bundle: andna_seal::SealedBundle = match serde_json::from_str(&raw) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: cannot parse seal {}: {}", seal_path.display(), e);
+            return 2;
+        }
+    };
+
+    let frame_bytes: Vec<u8> = match hex::decode(&bundle.frame_hex) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: seal frame_hex is not valid hex: {}", e);
+            return 2;
+        }
+    };
+
+    let frame_len_status = if frame_bytes.len() == FRAME_V2_LEN {
+        "ok"
+    } else {
+        "bad_length"
+    };
+
+    let manifest_hash = bundle.manifest.manifest_hash();
+    let manifest_hash_hex = hex::encode(manifest_hash);
+
+    println!("\n════════════════════════════════════════════════════════════");
+    println!("  AN-DNA Seal Inspection");
+    println!("════════════════════════════════════════════════════════════");
+    kv(4, "Seal sidecar", &seal_path.display().to_string());
+    kv(4, "Sidecar schema", &bundle.schema_version);
+    kv(4, "Frame encoding", &bundle.frame_encoding);
+    kv(4, "Frame length", &frame_bytes.len().to_string());
+    kv(4, "Frame length status", frame_len_status);
+    println!("────────────────────────────────────────────────────────────");
+    kv(4, "Manifest schema", &bundle.manifest.schema_version);
+    kv(4, "Manifest policy", &bundle.manifest.manifest_policy);
+    kv(4, "Digest algorithm", &bundle.manifest.digest_algorithm);
+    kv(4, "File name", &bundle.manifest.file_name);
+    kv(4, "File size", &bundle.manifest.file_size.to_string());
+    kv(
+        4,
+        "Content type",
+        bundle.manifest.content_type.as_deref().unwrap_or("(none)"),
+    );
+    kv(4, "File hash", &bundle.manifest.file_hash_hex);
+    kv(4, "Manifest hash", &manifest_hash_hex);
+
+    if frame_bytes.len() != FRAME_V2_LEN {
+        println!("────────────────────────────────────────────────────────────");
+        println!("  Inspection stopped: frame length is not FRAME_V2_LEN.");
+        println!("  This command does not repair or verify malformed seals.");
+        println!();
+        return 1;
+    }
+
+    let frame_ctx_hash = extract_frame_ctx_hash_for_cli(&frame_bytes);
+    let frame_ctx_hash_hex = hex::encode(frame_ctx_hash);
+    let ctx_matches = frame_ctx_hash == manifest_hash;
+
+    let mu_epoch = extract_mu_pre_epoch_for_cli(&frame_bytes);
+    let te_epoch = extract_te_epoch_for_cli(&frame_bytes);
+    let device_id16 = extract_te_device_id16_for_cli(&frame_bytes);
+    let device_id32 = extract_mu_pre_device_id32_for_cli(&frame_bytes);
+
+    println!("────────────────────────────────────────────────────────────");
+    kv(4, "Frame ctx_hash", &frame_ctx_hash_hex);
+    kv(
+        4,
+        "ctx_hash matches",
+        if ctx_matches { "yes" } else { "no" },
+    );
+    kv(4, "Frame epoch", &mu_epoch.to_string());
+    kv(4, "T_E epoch", &te_epoch.to_string());
+    kv(4, "device_id16", &hex::encode(device_id16));
+    kv(4, "device_id32", &hex::encode(device_id32));
+    println!("────────────────────────────────────────────────────────────");
+    println!("  Inspection only: this does NOT verify the file or authorize the signer.");
+    println!();
+
+    if ctx_matches {
+        0
+    } else {
+        1
+    }
+}
+
 fn cmd_verify_frame_legacy(args: &[String]) -> i32 {
     if args.is_empty() {
         usage();
@@ -679,6 +1296,12 @@ fn strerror(err: AndnaErr) -> String {
         .into_owned()
 }
 
+fn random_array<const N: usize>() -> Result<[u8; N], String> {
+    let mut out = [0u8; N];
+    getrandom::getrandom(&mut out).map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
 fn compute_verification_digest(records: &[VerificationRecord]) -> String {
     let mut hasher = Sha3_256::new();
     for r in records {
@@ -689,6 +1312,70 @@ fn compute_verification_digest(records: &[VerificationRecord]) -> String {
         hasher.update(entry.as_bytes());
     }
     hex_lower(&hasher.finalize())
+}
+
+fn opt_value(args: &[String], flag: &str) -> Option<String> {
+    args.windows(2).find_map(|w| {
+        if w[0] == flag {
+            Some(w[1].clone())
+        } else {
+            None
+        }
+    })
+}
+
+fn parse_hex_array<const N: usize>(s: &str, label: &str) -> Result<[u8; N], String> {
+    let raw = hex::decode(s).map_err(|e| format!("{} is not valid hex: {}", label, e))?;
+    if raw.len() != N {
+        return Err(format!(
+            "{} must be {} bytes / {} hex chars, got {} bytes / {} hex chars",
+            label,
+            N,
+            N * 2,
+            raw.len(),
+            s.len()
+        ));
+    }
+
+    let mut out = [0u8; N];
+    out.copy_from_slice(&raw);
+    Ok(out)
+}
+
+fn write_registry_for_bundle(bundle: &SealedBundle, path: &Path) -> io::Result<()> {
+    let frame = hex::decode(&bundle.frame_hex)
+        .expect("freshly sealed bundle always carries valid frame hex");
+
+    let facts = andna_pipeline::verified_facts_from_accepted_frame(&frame)
+        .expect("freshly sealed frame should yield verified facts");
+
+    let registry = CliRegistryFile {
+        snapshot_seq: 1,
+        as_of_unix_ms: now_unix_ms(),
+        policy_version: "andna-seal-cli-registry-v0".to_string(),
+        entries: vec![CliRegistryEntry {
+            device_id16_hex: hex::encode(facts.device_id16),
+            device_id32_hex: hex::encode(facts.device_id32),
+            authorized_te_hashes_hex: vec![hex::encode(facts.te_hash)],
+            current_epoch: facts.epoch,
+            revoked: false,
+            frozen: false,
+            recovery_hold: false,
+            policy_version: "andna-seal-cli-device-v0".to_string(),
+        }],
+    };
+
+    fs::write(
+        path,
+        serde_json::to_string_pretty(&registry).expect("CLI registry DTO is always serializable"),
+    )
+}
+
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn print_verify_result(
@@ -811,6 +1498,41 @@ fn hex_lower(bytes: &[u8]) -> String {
         use std::fmt::Write as _;
         let _ = write!(&mut out, "{:02x}", b);
     }
+    out
+}
+
+fn extract_frame_ctx_hash_for_cli(frame: &[u8]) -> [u8; MU_PRE_CTX_HASH_LEN] {
+    let off = FRAME_V2_MU_PRE_OFF + MU_PRE_CTX_HASH_OFF;
+    let mut out = [0u8; MU_PRE_CTX_HASH_LEN];
+    out.copy_from_slice(&frame[off..off + MU_PRE_CTX_HASH_LEN]);
+    out
+}
+
+fn extract_mu_pre_epoch_for_cli(frame: &[u8]) -> u64 {
+    let off = FRAME_V2_MU_PRE_OFF + MU_PRE_EPOCH_OFF;
+    let mut raw = [0u8; MU_PRE_EPOCH_LEN];
+    raw.copy_from_slice(&frame[off..off + MU_PRE_EPOCH_LEN]);
+    u64::from_le_bytes(raw)
+}
+
+fn extract_te_epoch_for_cli(frame: &[u8]) -> u64 {
+    let off = FRAME_V2_TE_OFF + TE_EPOCH_OFF;
+    let mut raw = [0u8; TE_EPOCH_LEN];
+    raw.copy_from_slice(&frame[off..off + TE_EPOCH_LEN]);
+    u64::from_le_bytes(raw)
+}
+
+fn extract_te_device_id16_for_cli(frame: &[u8]) -> [u8; TE_DEVICE_ID16_LEN] {
+    let off = FRAME_V2_TE_OFF + TE_DEVICE_ID16_OFF;
+    let mut out = [0u8; TE_DEVICE_ID16_LEN];
+    out.copy_from_slice(&frame[off..off + TE_DEVICE_ID16_LEN]);
+    out
+}
+
+fn extract_mu_pre_device_id32_for_cli(frame: &[u8]) -> [u8; MU_PRE_DEVICE_ID32_LEN] {
+    let off = FRAME_V2_MU_PRE_OFF + MU_PRE_DEVICE_ID32_OFF;
+    let mut out = [0u8; MU_PRE_DEVICE_ID32_LEN];
+    out.copy_from_slice(&frame[off..off + MU_PRE_DEVICE_ID32_LEN]);
     out
 }
 

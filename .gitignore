@@ -26,3 +26,7 @@ python/.venv/
 Thumbs.db
 .vscode/
 .idea//python/verification_log*.json
+
+# AN-DNA local software-profile secrets
+.andna/
+*.andna-sealer.json

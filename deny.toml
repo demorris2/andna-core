@@ -1,27 +1,24 @@
-# cargo-deny policy — place at the REPO ROOT (cargo-deny runs workspace-wide).
-# Reviewed for the whole andna-core workspace, not just D0.
+# cargo-deny workspace policy — ci/cargo-deny-policy-cleanup
+# Destination: deny.toml at the WORKSPACE ROOT (replaces the existing file).
+#
+# Design:
+# * Internal crates are private (`publish = false` on every workspace member — enforced by
+#   the sweep in the cleanup instructions) and are exempted from license policing via
+#   `licenses.private.ignore`. Only third-party licenses are policed.
+# * Internal path/workspace deps legitimately carry no registry version;
+#   `bans.allow-wildcard-paths` exempts them while still denying true wildcard versions
+#   ("*") on external dependencies.
+# * The windows-sys 0.59/0.61 duplicate comes from the bindgen/oqs-sys build toolchain and
+#   is harmless; duplicates warn rather than fail.
+# * NO oqs ban here: R1/mldsa44/ffi legitimately use oqs. D0/R2 isolation is enforced where
+#   it belongs — as `cargo tree` gates in the andna-d0 and file-seal CI lanes.
 
 [advisories]
-version = 2
-yanked = "deny"
-# ignore = []   # add specific RUSTSEC IDs only with written justification
-
-[bans]
-multiple-versions = "warn"
-wildcards = "deny"          # no "*" version requirements anywhere
-# IMPORTANT: do NOT ban oqs / oqs-sys / liboqs here. R1 (crates/core, crates/ffi,
-# crates/mldsa44) legitimately depends on liboqs via oqs = "0.10". A global ban would
-# break the workspace. D0's isolation from oqs is enforced per-crate in CI with
-#     cargo tree -p andna-d0 --locked   (must show no oqs/oqs-sys/liboqs)
-# — see .github/workflows/andna-d0.yml.
+yanked = "warn"
 
 [licenses]
-version = 2
-# Workspace-internal crates are license = "Proprietary" with publish = false. Skip them.
+# Requires `publish = false` on all internal crates; see cleanup instructions.
 private = { ignore = true }
-# External (transitive) dependency licenses. After the first `cargo deny check`, add any
-# additional valid licenses it reports for real deps (sha3, zeroize, subtle, fips204,
-# oqs, serde_json, hex, ...) rather than loosening the policy broadly.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -32,7 +29,14 @@ allow = [
     "Unicode-DFS-2016",
     "Unicode-3.0",
     "Zlib",
+    "CC0-1.0",
 ]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"

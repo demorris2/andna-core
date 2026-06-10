@@ -1,0 +1,73 @@
+name: file-seal-lane
+
+# Locks the file-seal milestone the same way prior milestones were locked (Gate 1, D0
+# interop, HMAC smoke): library tests + the operator-level CLI contract, on Linux, every
+# push. Deliberately does NOT run workspace `cargo deny check` — that governance failure is
+# deferred to the ci/cargo-deny-policy-cleanup branch and is unrelated to this lane.
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+      - "recovery/**"
+    paths:
+      - "crates/andna-seal/**"
+      - "crates/andna-r2/**"
+      - "crates/pipeline/**"
+      - "ffi_cli/**"
+      - "scripts/file_seal_cli_contract.sh"
+      - "Cargo.lock"
+      - ".github/workflows/file-seal.yml"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  file-seal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install liboqs build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev
+
+      - name: Rust toolchain (pinned by rust-toolchain.toml)
+        run: rustup show
+
+      - name: Cache cargo + liboqs build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: file-seal-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: R2 backend isolation (policy engine must stay oqs-free)
+        run: |
+          cargo tree -p andna-r2 --locked
+          if cargo tree -p andna-r2 --locked | grep -Ei '(^|[[:space:]])(oqs|oqs-sys|liboqs)([[:space:]]|$)'; then
+            echo "ERROR: andna-r2 must not depend on oqs/oqs-sys/liboqs"
+            exit 1
+          fi
+
+      - name: andna-seal library tests (file_seal_verify + evidence_contract)
+        run: cargo test -p andna-seal --locked
+
+      - name: andna-pipeline end-to-end tests
+        run: cargo test -p andna-pipeline --locked
+
+      - name: File-seal CLI contract (operator-level)
+        run: bash scripts/file_seal_cli_contract.sh
+
+      - name: Evidence note
+        run: |
+          echo "Lane green: seal/evidence library contracts, R1->R2 pipeline, R2 isolation,"
+          echo "and the four-command CLI contract incl. evidence v1 + attestation cases."
