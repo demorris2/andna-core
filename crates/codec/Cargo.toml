@@ -2,6 +2,7 @@
 name = "andna-codec"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [dependencies]
 andna-contracts = { workspace = true }

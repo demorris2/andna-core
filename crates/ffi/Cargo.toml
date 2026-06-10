@@ -2,6 +2,7 @@
 name = "andna-ffi"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]

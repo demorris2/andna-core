@@ -1811,6 +1811,7 @@ mod tests {
     /// overwrite them with this self-generated output. Kept as a debugging aid.
 
     #[cfg(feature = "oqs-backend")]
+    #[ignore = "developer utility for regenerating KAT vectors; run with --ignored"]
     #[test]
     fn kat_vector_gen() {
         let scheme =
