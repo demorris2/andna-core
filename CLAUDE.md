@@ -1,97 +1,75 @@
-# AN-DNA / ArcNeura — Claude Operating Notes
+# CLAUDE.md — andna-core house rules
 
-## Current state (post-HMAC sprint, 2026-05-30)
+Context for any agentic session in this repository. Read fully before editing anything.
 
-- **Working branch:** `fips/hmac-integrity` (HMAC software integrity sprint)
-- **Public main:** `origin/main` is behind local; see "Public repo" below.
-- **R1 status:** engineering work complete. Remaining P0 is CST-lab ACVP
-  session (an external lab engagement, not engineering work).
-- **Authoritative reproducibility lane:** Docker / GitHub Actions HostB.
-  Local Windows development is not authoritative due to Application Control
-  blocking generated test binaries.
+## Project in one paragraph
 
-## Toolchain and reproducibility
+AN-DNA is a post-quantum device/object trust system: D0 (epoch-ratcheted identity
+derivation, fips204/ML-DSA-44) → R1 (liboqs ML-DSA-44 frame verifier with deterministic
+evidence) → R2 (pure, oqs-free local policy/authorization engine) → andna-pipeline (the one
+seam composing R1+R2) → andna-seal (file sealing via mu_pre.ctx_hash binding) → ffi_cli
+("andna" operator CLI). Falsifiable, bounded claims only. Procurement-grade discipline.
 
-- **Rust:** 1.93.1 — pinned in three places (Dockerfile `ARG RUST_VERSION`,
-  Dockerfile `ENV RUSTUP_TOOLCHAIN`, repo `rust-toolchain.toml`). Do not
-  change without rebaselining Gate 1.
-- **liboqs:** 0.10.1, built from source per Dockerfile.
-- **Line endings:** LF, enforced repo-wide by `.gitattributes`. Do not change.
-- **Gate 1 anchor:** see `fips/gate1_golden.md` for current hashes. Gate 1
-  is now a two-artifact bundle (`libandna_ffi.so` + `libandna_ffi.integrity`).
-- **Gate 2 anchor:** `verification_digest = 85f4dc18777bc2122cf671dce6c2d69d92c80b5d0dbd78a83a644afa1159818d`.
-  This is locked and toolchain-independent. Any code change that alters this
-  value is a deliberate semantic change requiring an ADR.
+## Hard invariants — never violate
 
-## Do NOT
+1. **R1 is frozen.** Never modify the verifier (`crates/core` verify path), `crates/ffi`
+   crypto/integrity code, or anything Golden-Hash/Gate-1 anchored. If a test fails against
+   R1, fix the caller, never the verifier.
+2. **No second verifier.** All verification goes through `andna_core::verify_frame_v2` /
+   `andna_pipeline::verify_and_authorize`. Never reimplement frame parsing+signature
+   checking elsewhere. (Reading public fields at contract offsets is fine; deciding
+   validity is not.)
+3. **R2 stays oqs-free.** `cargo tree -p andna-r2` must never show oqs/oqs-sys/liboqs.
+   Same for `andna-d0`. CI enforces this; don't add deps that break it.
+4. **Constants live in `andna-contracts`.** Never duplicate offsets/lengths; import them.
+   The ffi/xtask HMAC-constant duplication is intentional (frozen-boundary decision) — do
+   not consolidate it.
+5. **No secrets in git.** `.andna/` is gitignored (sealer/verifier profiles contain seed
+   material). Never commit profiles, never print seeds into docs. Fixed TEST seeds used via
+   `--seed-hex` in demos are allowed only when clearly labeled "TEST SEED — demo only".
+6. **Claim boundaries are law.** `docs/file-seal/file-seal-claim-boundaries.md` governs all
+   public-facing language. Reference it; never fork or paraphrase-expand its claims. Never
+   write: hardware custody, clone resistance, FIPS-validated, encryption, "impossible to
+   forge", or "replaces Sigstore/SLSA/TUF/in-toto".
+7. **Review freeze (active).** Until the independent cryptographic review returns: no D0
+   production-claim code, no R2 claim expansion, no new cryptographic mechanisms, no
+   architecture-packet rewrites. Docs, demos, tests, and hygiene only.
 
-- Wire Python into the FIPS cryptographic module boundary.
-- Change protocol constants in `crates/contracts/src/lib.rs`.
-- Change the Gate 2 `verification_digest` without an explicit ADR.
-- Add zero-knowledge features. ZK is future research, not R1.
-- Use the `fips-integrity-stub` feature in any release artifact. The stub
-  is development-only; release lanes use `fips-integrity-hmac`.
-- Use the `stub` mldsa44 backend in any release artifact.
-- Broaden R1 product scope or add new SKUs.
+## Build & test (environment facts)
 
-## Build commands (MSYS2 MinGW64, where liboqs is installed)
+- Windows dev box: cargo runs in MSYS2 MinGW64; git in Git Bash. Linux CI: ubuntu-latest.
+- `cargo test --workspace` FAILS by design: `andna-ffi` has a compile_error! feature gate.
+  Correct full-test invocation:
+  - `cargo test --workspace --exclude andna-ffi --exclude ffi-cli --locked`
+  - FFI separately: `cargo test -p andna-ffi --locked --features "oqs-backend fips-integrity-hmac fips-kat-vectors-embedded" -- --test-threads=1`
+- CLI build: `cargo build -p ffi-cli --locked --features "oqs-backend fips-integrity-stub"`
+- Operator contract: `bash scripts/file_seal_cli_contract.sh` → must end `PASS: file-seal CLI contract`
+- Seal/evidence: `cargo test -p andna-seal --locked` (15 tests). Pipeline:
+  `cargo test -p andna-pipeline --locked` (4 tests).
+- Windows quirk: Application-Control AV may block fresh test exes (os error 4551) — rerun.
+- `cargo fmt --all` before every commit; CI checks it.
 
-Development (stub integrity, fast iteration):
-```bash
-cargo test -p andna-ffi \
-  --features "oqs-backend fips-integrity-stub fips-kat-vectors-embedded"
-```
+## Style rules (earned the hard way)
 
-Release / FIPS lane (real HMAC integrity):
-```bash
-cargo build -p andna-ffi --release \
-  --features "oqs-backend fips-integrity-hmac fips-kat-vectors-embedded"
+- **No backslash line continuations in any shell script** — pasted continuations have been
+  destroyed twice on the dev box. One command per line. The contract script declares this
+  rule in a header comment; preserve it.
+- Multi-line `git commit -m` messages are banned in interactive shells; use multiple
+  single-line `-m` flags (Claude Code may use commit-message files safely).
+- Every delivered file is identified by FULL destination path. Every crate has a
+  `src/lib.rs`; the directory, not the filename, is the identity.
+- Tests assert exact error variants / exact output strings (the CLI's kv column spacing in
+  grep assertions is intentional — do not "clean it up").
+- Diagnostic tests are removed before final commit; the suite stays procurement-clean.
 
-cargo run -p xtask -- write-integrity-reference \
-  target/release/libandna_ffi.so \
-  target/release/libandna_ffi.integrity
-```
+## Branch & merge discipline
 
-The HMAC release lane requires both artifacts to ship together, with
-`ANDNA_INTEGRITY_MODULE_PATH` and `ANDNA_INTEGRITY_REF_PATH` set at
-runtime. See `fips/security_policy_draft.md` for the trust-boundary
-implications.
+scoped branch → local validation → push → CI green (file-seal-lane, governance, and any
+touched lane) → PR → merge. Never merge red. Never work directly on main.
 
-## R1 proof-pack regression (run after any crypto-facing change)
+## Where things live
 
-```bash
-rm -f verification_log.json andna_audit.jsonl audit_validate.json tampered_frame.bin
-rm -rf evidence hostb_out
-
-./target/release/andna verify demo/fixtures/sample_frame.bin
-./target/release/andna tamper demo/fixtures/sample_frame.bin tampered_frame.bin
-{ ./target/release/andna verify tampered_frame.bin || true; }
-./target/release/andna replay verification_log.json --frame demo/fixtures/sample_frame.bin
-./target/release/andna export evidence
-```
-
-Verify `verification_digest` matches the Gate 2 value above. The `|| true`
-wrapper on the tampered verify is required because REJECT returns exit
-code 1, which would otherwise break the `&&` chain.
-
-## Files that should never appear as modified in `git status`
-unless deliberately changed:
-- `include/andna_vnext_contracts.h` — auto-generated by `contracts_codegen`
-- `include/andna_core.h` — auto-generated by cbindgen
-- Anything under `target/`, `evidence/`, `hostb_out/`
-
-## Public repo (`origin/main`)
-
-`origin/main` currently lags local by ~2 weeks (as of 2026-05-30).
-Recent sprint work — ACVP KAT swap, toolchain consolidation, cross-host
-LF fix, HMAC software integrity — is on `fips/hmac-integrity` and not
-yet on public main. Coordinate any public push with a doc-convergence
-review pass; do not push individual feature branches without consolidating.
-
-## Commit message conventions
-
-Conventional Commits: `type(scope): summary`. Common types in this repo:
-- `feat(fips)`, `test(fips)`, `build(fips)`, `ci(fips)` — FIPS package work
-- `docs(fips)` — FIPS documentation updates
-- `fix(repro)`, `build(repro)` — reproducibility lane work
-- `chore(repo)` — repo hygiene, cleanup
+- Contracts/offsets: `crates/contracts`. Verifier: `crates/core`. Policy: `crates/andna-r2`.
+- Composition: `crates/pipeline`. Sealing+evidence: `crates/andna-seal`.
+- CLI: `ffi_cli` (binary name `andna`). Operator contract: `scripts/file_seal_cli_contract.sh`.
+- Docs: `docs/file-seal/`. CI: `.github/workflows/{file-seal.yml,governance.yml,...}`.
