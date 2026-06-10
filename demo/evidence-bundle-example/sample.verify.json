@@ -1,0 +1,35 @@
+{
+  "schema_version": "andna-seal-evidence-v1",
+  "deterministic": {
+    "result": "ACCEPT",
+    "authentic": true,
+    "unchanged": "yes",
+    "unchanged_detail": null,
+    "authorized": "yes",
+    "reason_code": "registry_entry_valid",
+    "verify_error": null,
+    "file_hash_hex": "903aba36b00c53e5464383f17b5f5b709c9c6fdea5bfab13ca89d7a0e3915040",
+    "frame_hash_hex": "d40a7c348f30cd12423e4e7c4120a31d77d3885273d4ab9d3bef01f65b55d18f",
+    "manifest_hash_hex": "7d593de014bdb124b610dbbcad8a3b18f2a07dcafc2bfc3bd5e0e1854b3f4734",
+    "frame_ctx_hash_hex": "7d593de014bdb124b610dbbcad8a3b18f2a07dcafc2bfc3bd5e0e1854b3f4734",
+    "epoch": 7,
+    "device_id32_hex": "b45e300e71a68815ea06fac2fa9bb161889e9802c207a1b88b7f49782e4f85e4",
+    "te_hash_hex": "ad80b8576ea75bd7c94d9d4f141b765387e7f626249b1b0027404f8533cb05d9f97e56fa85cceb46fe6f7c80f8cd418c0492495edfb670a9a08b5b62c693e63a",
+    "attestation_status": "NONE_SOFTWARE_PROFILE",
+    "registry_policy_version": "andna-seal-cli-registry-v0",
+    "entry_policy_version": "andna-seal-cli-device-v0",
+    "snapshot_seq": 1,
+    "as_of_unix_ms": 1781115161136,
+    "registry_snapshot_hash_hex": "a6881afd9b17785250c51d6c355e48ecb25e1131fd8f0e3db4cff67eda88d9e7",
+    "policy_digest_hex": "53a4e5e55b599fe410ce9dea832c098270e12102e62582fadf5db70f9b03a009"
+  },
+  "evidence_digest_hex": "3ff8de2b4a467f591191e01086569d4226f90f1a8797c3ab035a492fff1c8a7c",
+  "runtime": {
+    "file_path": "demo/evidence-bundle-example/sample.txt",
+    "seal_path": "demo/evidence-bundle-example/sample.txt.andna-seal.json",
+    "registry_path": "demo/evidence-bundle-example/sample.registry.json",
+    "tool_version": "andna 0.1.0",
+    "verified_at_unix_ms": 1781115161673
+  },
+  "display_summary": "AUTHENTIC: yes | UNCHANGED: yes | AUTHORIZED: yes"
+}

@@ -1,0 +1,19 @@
+{
+  "snapshot_seq": 1,
+  "as_of_unix_ms": 1781115161136,
+  "policy_version": "andna-seal-cli-registry-v0",
+  "entries": [
+    {
+      "device_id16_hex": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+      "device_id32_hex": "b45e300e71a68815ea06fac2fa9bb161889e9802c207a1b88b7f49782e4f85e4",
+      "authorized_te_hashes_hex": [
+        "ad80b8576ea75bd7c94d9d4f141b765387e7f626249b1b0027404f8533cb05d9f97e56fa85cceb46fe6f7c80f8cd418c0492495edfb670a9a08b5b62c693e63a"
+      ],
+      "current_epoch": 7,
+      "revoked": false,
+      "frozen": false,
+      "recovery_hold": false,
+      "policy_version": "andna-seal-cli-device-v0"
+    }
+  ]
+}
