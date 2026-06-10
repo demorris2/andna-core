@@ -2,7 +2,7 @@
 name = "andna-contracts"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+publish = false
 authors.workspace = true
 description = "AN-DNA vNext Phase 1 canonical contracts — single source of truth"
 

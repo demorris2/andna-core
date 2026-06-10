@@ -2,6 +2,7 @@
 name = "xtask"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [dependencies]
 hmac = "0.12"

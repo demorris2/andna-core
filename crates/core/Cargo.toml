@@ -2,6 +2,7 @@
 name = "andna-core"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [features]
 default = ["oqs-backend"]
