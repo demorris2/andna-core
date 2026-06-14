@@ -90,7 +90,7 @@ fn digest_consistency_is_not_replay() {
 
     // Now verify the SAME sidecar against different bytes (simulates a file that has
     // changed since sealing, or a "rollback" scenario).
-    let different_file = b"different content — not what was sealed";
+    let different_file = b"different content, not what was sealed";
     let reject_evidence = SealEvidenceV1::from_result(
         &verify_sealed(&bundle, different_file, &reg),
         RuntimeContext::default(),
@@ -114,8 +114,7 @@ fn digest_consistency_is_not_replay() {
     // different decision events. The ACCEPT evidence describes a past event;
     // it does not prove the current state of the file.
     assert_ne!(
-        accept_evidence.evidence_digest_hex,
-        reject_evidence.evidence_digest_hex,
+        accept_evidence.evidence_digest_hex, reject_evidence.evidence_digest_hex,
         "ACCEPT and REJECT evidence for the same sidecar must have different digests"
     );
 }

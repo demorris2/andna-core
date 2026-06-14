@@ -125,7 +125,10 @@ fn ancient_snapshot_timestamp_does_not_block_authorization() {
         d.stage2, "AUTHORIZED",
         "R2 does not currently enforce a freshness floor; ancient snapshot must still authorize"
     );
-    assert_eq!(d.as_of_unix_ms, 0, "as_of_unix_ms = 0 is recorded faithfully");
+    assert_eq!(
+        d.as_of_unix_ms, 0,
+        "as_of_unix_ms = 0 is recorded faithfully"
+    );
 }
 
 // ── Not-yet-built: stale-snapshot warning ─────────────────────────────────────

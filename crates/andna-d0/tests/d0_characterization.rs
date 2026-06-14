@@ -13,8 +13,8 @@
 //! non-zero healing, and the `d0-connected-healing` feature is never enabled.
 
 use andna_d0::{
-    check_deterministic_healing, ratchet_deterministic, SecretState, D0Error,
-    D0_HEALING_SLOT_LEN, D0_P_N, EPOCH_SEED_DOMAIN, MLDSA_SEED_DOMAIN, RATCHET_STATE_DOMAIN,
+    check_deterministic_healing, ratchet_deterministic, D0Error, SecretState, D0_HEALING_SLOT_LEN,
+    D0_P_N, EPOCH_SEED_DOMAIN, MLDSA_SEED_DOMAIN, RATCHET_STATE_DOMAIN,
 };
 
 // ── Domain labels ─────────────────────────────────────────────────────────────

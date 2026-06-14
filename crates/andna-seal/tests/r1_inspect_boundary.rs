@@ -9,7 +9,7 @@
 //! it does not duplicate the tamper/reject matrix already covered there.
 
 use andna_contracts::TE_DEVICE_ID16_LEN;
-use andna_pipeline::{Registry, RegistryEntry, VerifiedFacts, verified_facts_from_accepted_frame};
+use andna_pipeline::{verified_facts_from_accepted_frame, Registry, RegistryEntry, VerifiedFacts};
 use andna_seal::{seal_file, verify_sealed, SealedBundle, SoftwareProfileSigner, Verdict};
 
 fn signer() -> SoftwareProfileSigner {
@@ -84,11 +84,7 @@ fn sidecar_structural_parse_carries_no_verdict() {
         inspect_only.authentic,
         "frame must be authentic (R1 passes; the crypto is valid)"
     );
-    assert_eq!(
-        inspect_only.unchanged,
-        Verdict::Yes,
-        "file is unchanged"
-    );
+    assert_eq!(inspect_only.unchanged, Verdict::Yes, "file is unchanged");
     assert_eq!(
         inspect_only.authorized,
         Verdict::No,
@@ -122,10 +118,7 @@ fn tampered_frame_is_not_rescued_by_matching_registry() {
     tampered.frame_hex = hex::encode(&tampered_frame);
 
     let result = verify_sealed(&tampered, file, &auth_reg);
-    assert!(
-        !result.authentic,
-        "tampered frame must not be authentic"
-    );
+    assert!(!result.authentic, "tampered frame must not be authentic");
     assert_eq!(
         result.unchanged,
         Verdict::NotEvaluated,
