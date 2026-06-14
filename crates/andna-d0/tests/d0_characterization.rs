@@ -71,6 +71,8 @@ fn domain_labels_are_distinct_and_v1_suffixed() {
 
 // ── Healing guard: multiple non-zero patterns ─────────────────────────────────
 
+type HealingMaker = fn() -> [u8; D0_HEALING_SLOT_LEN];
+
 /// `check_deterministic_healing` rejects a variety of non-zero patterns, not only
 /// `h[0] = 1`. The existing inline test (`deterministic_healing_guard`) covers the
 /// first-byte case; this test adds coverage of middle byte, last byte, all-ones, and
@@ -80,7 +82,7 @@ fn healing_guard_rejects_multiple_nonzero_patterns() {
     let zero = [0u8; D0_HEALING_SLOT_LEN];
     assert_eq!(check_deterministic_healing(&zero), Ok(()));
 
-    let patterns: &[(&str, fn() -> [u8; D0_HEALING_SLOT_LEN])] = &[
+    let patterns: &[(&str, HealingMaker)] = &[
         ("last byte set", || {
             let mut h = [0u8; D0_HEALING_SLOT_LEN];
             h[D0_HEALING_SLOT_LEN - 1] = 0xFF;
