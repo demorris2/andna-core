@@ -13,9 +13,28 @@
 //! non-zero healing, and the `d0-connected-healing` feature is never enabled.
 
 use andna_d0::{
-    check_deterministic_healing, ratchet_deterministic, D0Error, SecretState, D0_HEALING_SLOT_LEN,
-    D0_P_N, EPOCH_SEED_DOMAIN, MLDSA_SEED_DOMAIN, RATCHET_STATE_DOMAIN,
+    check_deterministic_healing, derive_epoch_keypair, ratchet_deterministic, D0Context, D0Error,
+    SecretState, D0_HEALING_SLOT_LEN, D0_P_N, EPOCH_SEED_DOMAIN, MLDSA_SEED_DOMAIN,
+    RATCHET_STATE_DOMAIN,
 };
+
+// Fixed device_id16 for keypair-based comparisons (value is arbitrary; only used for equality).
+const TEST_DEVICE: [u8; 16] = [0xABu8; 16];
+
+/// Derive the epoch public key bytes from `state` at `epoch`. Two states that are identical
+/// produce identical epoch keypairs, making this a feature-gate-free proxy for state equality.
+/// (`SecretState` omits `PartialEq` by design; `coeffs_for_review` requires cfg(test) in the
+/// library, which is false for integration test binaries.)
+fn public_key_at(state: &SecretState, epoch: u64) -> Vec<u8> {
+    let ctx = D0Context {
+        epoch,
+        device_id16: TEST_DEVICE,
+    };
+    derive_epoch_keypair(state, &ctx)
+        .expect("derive_epoch_keypair")
+        .public_key_bytes()
+        .to_vec()
+}
 
 // ── Domain labels ─────────────────────────────────────────────────────────────
 
@@ -97,14 +116,13 @@ fn healing_guard_rejects_multiple_nonzero_patterns() {
 /// (state, epoch) inputs produces identical outputs. This is verified across a 3-epoch
 /// chain (the same depth as D0-TV-004 in the inline KAT suite).
 ///
-/// Note: SecretState intentionally omits PartialEq (no constant-time compare). We use
-/// `coeffs_for_review()` to compare, which is the review/test accessor for this purpose.
+/// Comparison is via derived epoch public keys: identical states produce identical
+/// ML-DSA-44 keypairs, so identical public key bytes.
 #[test]
 fn ratchet_is_reproducible_across_three_epochs() {
     // Build a valid initial state from a fixed, known coefficient array.
     // All coefficients set to 1 are valid (1 < q = 8_380_417).
-    let init_coeffs = [1u32; D0_P_N];
-    let p0 = SecretState::from_coeffs(init_coeffs).expect("valid state");
+    let p0 = SecretState::from_coeffs([1u32; D0_P_N]).expect("valid state");
 
     // First chain: p0 -> p1 -> p2 -> p3
     let p1a = ratchet_deterministic(&p0, 0);
@@ -117,18 +135,18 @@ fn ratchet_is_reproducible_across_three_epochs() {
     let p3b = ratchet_deterministic(&p2b, 2);
 
     assert_eq!(
-        p1a.coeffs_for_review(),
-        p1b.coeffs_for_review(),
+        public_key_at(&p1a, 0),
+        public_key_at(&p1b, 0),
         "ratchet epoch 0->1 must be reproducible"
     );
     assert_eq!(
-        p2a.coeffs_for_review(),
-        p2b.coeffs_for_review(),
+        public_key_at(&p2a, 1),
+        public_key_at(&p2b, 1),
         "ratchet epoch 1->2 must be reproducible"
     );
     assert_eq!(
-        p3a.coeffs_for_review(),
-        p3b.coeffs_for_review(),
+        public_key_at(&p3a, 2),
+        public_key_at(&p3b, 2),
         "ratchet epoch 2->3 must be reproducible"
     );
 }
@@ -143,9 +161,10 @@ fn ratchet_output_depends_on_epoch() {
     let p_from_epoch0 = ratchet_deterministic(&p0, 0);
     let p_from_epoch1 = ratchet_deterministic(&p0, 1);
 
+    // Compare via derived keypairs: different ratchet outputs → different epoch keys.
     assert_ne!(
-        p_from_epoch0.coeffs_for_review(),
-        p_from_epoch1.coeffs_for_review(),
+        public_key_at(&p_from_epoch0, 0),
+        public_key_at(&p_from_epoch1, 0),
         "ratchet with epoch=0 vs epoch=1 must produce different outputs (epoch is bound)"
     );
 }
