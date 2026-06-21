@@ -17,6 +17,32 @@ framing for reviewer and communications use.
 | **Audit chain** | Built — local integrity only | "Append-only hash-linked local log; detects local tamper, duplication, deletion, reordering; single-writer" | "tamper-proof audit"; "distributed ledger"; "publicly auditable" (without external anchoring) |
 | **File-seal overall** | Built — MVP wedge | "Deterministic trust-evidence layer; separates authenticity, unchanged state, and authorization; replayable evidence contract" | "encrypts files"; "replaces Sigstore/SLSA/TUF/in-toto"; "hardware custody"; "impossible to forge" |
 
+## Evidence-basis labels (F8 — L1 hardening)
+
+Each claim's evidence basis indicates HOW STRONGLY the claim is established. This composes
+with the F2 three-level split (level = what KIND of claim; basis = how strongly established).
+No tested-or-assumed claim should ever be presented as proven.
+
+| Basis | Definition | Requirement |
+|---|---|---|
+| **Proven** | Traces to source-verified or measured evidence: a passing test against the real implementation, a verified NIST vector, or a confirmed specification match | Must cite the specific test, vector, or measurement |
+| **Tested** | Exercised by the test suite under representative conditions, but not exhaustively verified or source-traced to a specification | Must cite the test(s) |
+| **Assumed** | Follows from architectural reasoning, dependency trust, or specification trust without independent verification in this build | Must state the assumption explicitly |
+
+| Claim | Evidence basis | Citation / assumption |
+|---|---|---|
+| **R1 verification** | **Tested** — ACVP KAT vectors pass; 4 negative directives each isolated by exact error variant (`d0_fips204_to_liboqs_r1_interop_accepts`); signature verify via liboqs | Pending: ACVP lab session will upgrade to **Proven** for FIPS conformance |
+| **D0 ratchet determinism** | **Tested** — `ratchet_is_reproducible_across_three_epochs`, `ratchet_output_depends_on_epoch` | `d0_characterization.rs` |
+| **D0 domain separation** | **Tested** — `domain_labels_are_distinct_and_v1_suffixed`; `epoch_substitution_produces_different_key`, `device_id_substitution_produces_different_key` | `d0_characterization.rs`, `d0_domain_separation.rs` |
+| **D0 forward secrecy** | **Assumed** — requires past state `P_E` to be erased; not tested or proven in this build | State-erasure assumption is architectural; no test proves past state is unrecoverable |
+| **R2 fail-closed** | **Tested** — `not_evaluated_when_signature_tampered_even_if_registry_would_authorize`; value-binding differential proves R2 sees the exact frame R1 accepted | `d0_r1_r2_pipeline.rs`, `r1_r2_value_binding.rs` |
+| **R2 policy evaluation** | **Tested** — ~20 policy engine tests cover authorized, revoked, frozen, recovery-hold, epoch-stale, policy-version-mismatch | `policy_engine.rs`, `r2_characterization.rs` |
+| **Evidence digest consistency** | **Tested** — `digest_consistency_is_not_replay` proves `digest_consistent()` is NOT equivalent to re-verification | `evidence_characterization.rs` |
+| **Seal binding faithfulness** | **Tested** — 7 independent manifest-field perturbations each break binding; all fields produce distinct hashes | `binding_faithfulness.rs` |
+| **Audit chain integrity** | **Tested** — hash-chain linking, tamper detection, reordering detection | `crates/audit/src/tests.rs` |
+| **ML-DSA-44 security level** | **Assumed** — NIST Category 2 claim rests on NIST's parameter validation and liboqs certification; not independently verified in this build | Assumption: NIST + OQS parameter selection is sound; see F4 security-level assumptions table |
+| **Software-profile key custody** | **Assumed** — "possession at signing time" is architectural; no test proves the seed wasn't exfiltrated | Assumption: operator protects the profile file |
+
 ## Banned words (carry-forward from claim-boundary doc)
 
 These words must not appear in any external communication about the current build, regardless
