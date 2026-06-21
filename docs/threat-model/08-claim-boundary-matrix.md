@@ -52,6 +52,29 @@ of context:
 | SHA3-256 | Evidence digest; R2 policy digest; registry snapshot hash; manifest hash (file hash + name + size) |
 | HKDF-SHA512 | Retired v3.3 design ONLY — must not appear in any current-capability description |
 
+## Security-level assumptions (F4 — L1 hardening)
+
+All security-level claims in this project are stated WITH their underlying assumptions and a
+dated cryptanalysis baseline. A security level is not a timeless absolute — it is a statement
+relative to the best-known attacks at a specific date.
+
+| Claim | Stated level | Assumption | Baseline date | Source |
+|---|---|---|---|---|
+| ML-DSA-44 (FIPS 204) | NIST Category 2 (≈128-bit PQ security) | Best-known lattice attacks as of the NIST PQC standardization, including quantum core-SVP sieving | 2024-08 (FIPS 204 publication) | NIST FIPS 204 §1; parameter selection rationale in the ML-DSA specification |
+| SHAKE256 (FIPS 202) | 256-bit security strength | Best-known attacks on Keccak sponge construction | 2015-08 (SHA-3 publication); no known weakening as of 2025-08 | NIST FIPS 202; SHA-3 competition analysis |
+| SHA3-256 (FIPS 202) | 128-bit collision resistance, 256-bit preimage | Same as SHAKE256 | Same as SHAKE256 | NIST FIPS 202 |
+| D0 ratchet forward secrecy | Conditional on past-state erasure | Prior-state-recovery resistance ASSUMES past polynomial state `P_E` is not retained by any party; if past state is retained, forward secrecy does not hold | N/A (architectural assumption, not a cryptanalytic claim) | D0 spec v0.3 §14 |
+
+**Rule inversion note (F4):** This project follows an "authority outranks recency" rule for
+document integrity (older authoritative source wins over newer informal source). For security
+margins, this rule INVERTS: recency of cryptanalysis is precisely what must be tracked, because
+new attacks erode margins. A NIST category designation from 2024 may need re-evaluation if a
+2026 result changes the core-SVP sieving exponent. Track both rules; do not let them collide.
+
+**F4 scan result:** `git grep -niE 'delta|don.t change|do not change' crates/` — no hardcoded
+security constant analogous to L1's `DELTA128 = 1.0044` found in any crate. ML-DSA-44
+parameters are NIST-defined and consumed from liboqs/fips204, not hardcoded in this repo.
+
 ## Reviewer questions
 
 1. The D0 "review-scoped" status — does "review-scoped" need a more precise label (e.g.
