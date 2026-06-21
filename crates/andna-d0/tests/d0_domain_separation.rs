@@ -20,7 +20,8 @@
 //! RECONCILED against d0_characterization.rs:
 //!   - ratchet_output_depends_on_epoch — pins ratchet epoch sensitivity (different
 //!     epoch → different ratchet output).
-//! This file adds: epoch-confusion and context-confusion at the KEY DERIVATION level
+//!
+//! This file adds epoch-confusion and context-confusion at the KEY DERIVATION level
 //! (derive_epoch_keypair), proving the key itself changes — not just the ratchet
 //! intermediate.
 
