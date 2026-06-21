@@ -56,7 +56,9 @@ grep -q "Frame epoch:           7" <<<"$INSPECT_OUT"
 grep -q "T_E epoch:             7" <<<"$INSPECT_OUT"
 
 echo
-echo "== verify-file clean + authorized registry =="
+echo "== POSITIVE CONTROL (F6 gate): verify-file clean + authorized registry =="
+echo "   If this section fails, ALL subsequent adversarial/negative results are INCONCLUSIVE."
+echo "   The honest seal/verify path must pass before any adversarial finding is trusted."
 VERIFY_OUT="$("$BIN" verify-file sample.txt --seal sample.txt.andna-seal.json --registry sample.registry.json --evidence-out sample.verify.json)"
 echo "$VERIFY_OUT"
 
@@ -66,6 +68,8 @@ grep -q "AUTHORIZED:            yes" <<<"$VERIFY_OUT"
 grep -q "RESULT:                ACCEPT" <<<"$VERIFY_OUT"
 
 test -f sample.verify.json
+
+echo "POSITIVE CONTROL: PASSED — adversarial tests may proceed."
 
 echo
 echo "== evidence record matches the v1 contract =="
